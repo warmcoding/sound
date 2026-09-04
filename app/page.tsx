@@ -91,7 +91,7 @@ export default function Home() {
         {audioUrl && (
           <div className="w-full flex flex-col items-center gap-4 animate-in fade-in zoom-in duration-300">
             <p className="text-sm text-zinc-500 dark:text-zinc-400 truncate max-w-full">
-              当前文件 file : {audioFile?.name}
+              当前文件: {audioFile?.name}
             </p>
             <audio
               controls
