@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export async function POST(request: NextRequest) {
     try {
-        // 1. 接收前端传来的 FormData（包含音频文件）
+        // 1. 接收前端传来的 FormData
         const formData = await request.formData();
         const file = formData.get('file') as File;
 
@@ -13,35 +13,31 @@ export async function POST(request: NextRequest) {
 
         console.log(`[Next.js] 收到文件: ${file.name}, 准备转发给 Python...`);
 
-        // ==========================================
-        // ⬇️ 这里是修改的核心部分 ⬇️
-        // ==========================================
-
-        // 2. 将文件转发给真实的 Python 后端
-        // 假设你的 Python 后端运行在 http://localhost:8000/process
-        // 注意：这里使用的是 Node.js 环境下的 fetch，不是浏览器的 fetch
-        const pythonResponse = await fetch('http://localhost:8000/process', {
+        // 2. 转发给真实的 Python 后端 (注意路径改成了 /separate-audio/)
+        const pythonResponse = await fetch('http://localhost:8000/separate-audio/', {
             method: 'POST',
             body: formData,
-            // ⚠️ 关键点：不要手动设置 Content-Type，让 Node.js 自动处理 boundary
         });
 
-        // 3. 检查 Python 后端是否处理成功
+        // 3. 检查 Python 是否报错
         if (!pythonResponse.ok) {
-            throw new Error(`Python 后端报错: ${pythonResponse.statusText}`);
+            const errorText = await pythonResponse.text();
+            throw new Error(`Python 后端报错: ${errorText}`);
         }
 
-        // 4. 获取 Python 返回的 JSON 数据
-        const result = await pythonResponse.json();
+        // 4. 【核心】因为 Python 返回的是 ZIP 文件流，我们需要把它作为 Blob 接收
+        const blob = await pythonResponse.blob();
 
-        // ==========================================
-        // ⬆️ 修改结束 ⬆️
-        // ==========================================
+        console.log('[Next.js] Python 处理完成，ZIP 文件已生成，返回给前端');
 
-        console.log('[Next.js] Python 处理完成，返回结果给前端');
-
-        // 5. 把结果返回给前端
-        return NextResponse.json(result);
+        // 5. 把文件流返回给前端，并带上正确的 Header
+        return new NextResponse(blob, {
+            status: 200,
+            headers: {
+                'Content-Disposition': `attachment; filename="${file.name.split('.')[0]}_stems.zip"`,
+                'Content-Type': 'application/zip',
+            },
+        });
 
     } catch (error) {
         console.error('[Next.js] 中转出错:', error);
