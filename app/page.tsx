@@ -1,5 +1,5 @@
 'use client';
-
+import { supabase } from '@/lib/supabase';
 import { useState, useRef, useCallback } from 'react';
 
 // 定义 6 声道结构
@@ -82,25 +82,68 @@ export default function Home() {
   };
 
   // 🚀 本地测试模式：载入预设音轨与和弦数据
+  // const handleStartSeparation = async () => {
+  //   setIsProcessing(true);
+  //   setStatusMsg('🎵 本地演示模式：正在载入音轨与和弦数据...');
+
+  //   setTimeout(() => {
+  //     const loadedTracks: Track[] = DEFAULT_TRACKS.map((t) => ({
+  //       id: t.id,
+  //       name: t.name,
+  //       url: `/demo-tracks/${t.file}`,
+  //       volume: 0.8,
+  //       isMuted: false,
+  //       isPlaying: false,
+  //     }));
+
+  //     setTracks(loadedTracks);
+  //     setChords(MOCK_CHORDS);
+  //     setStatusMsg('✅ 音轨与和弦识别加载成功！已进入跟弹模式');
+  //     setIsProcessing(false);
+  //   }, 1200);
+  // };
+
+
+  // 🚀 真实模式：上传源文件至 Supabase Storage
   const handleStartSeparation = async () => {
+    if (!audioFile) {
+      alert('请先选择或拖拽音频文件！');
+      return;
+    }
+
     setIsProcessing(true);
-    setStatusMsg('🎵 本地演示模式：正在载入音轨与和弦数据...');
+    setStatusMsg('1/3 正在上传音频到 Supabase 云端存储...');
 
-    setTimeout(() => {
-      const loadedTracks: Track[] = DEFAULT_TRACKS.map((t) => ({
-        id: t.id,
-        name: t.name,
-        url: `/demo-tracks/${t.file}`,
-        volume: 0.8,
-        isMuted: false,
-        isPlaying: false,
-      }));
+    try {
+      // 1. 生成唯一文件名，防止重名覆盖
+      const fileExt = audioFile.name.split('.').pop();
+      const fileName = `${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${fileExt}`;
+      const filePath = `uploads/${fileName}`;
 
-      setTracks(loadedTracks);
-      setChords(MOCK_CHORDS);
-      setStatusMsg('✅ 音轨与和弦识别加载成功！已进入跟弹模式');
+      // 2. 上传文件到 original-audio Bucket
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('original-audio')
+        .upload(filePath, audioFile);
+
+      if (uploadError) throw uploadError;
+
+      // 3. 获取公开访问 URL
+      const { data: urlData } = supabase.storage
+        .from('original-audio')
+        .getPublicUrl(filePath);
+
+      const publicUrl = urlData.publicUrl;
+      setStatusMsg(`✅ 音频上传成功！文件地址: ${publicUrl}`);
+      console.log('原曲云端地址:', publicUrl);
+
+      // TODO: 下一步将 publicUrl 传给 Colab 或 Modal 进行后端 GPU 拆分...
+
+    } catch (err: any) {
+      console.error('上传失败:', err);
+      setStatusMsg(`❌ 上传失败: ${err.message || '网络异常'}`);
+    } finally {
       setIsProcessing(false);
-    }, 1200);
+    }
   };
 
   // 🎵 1. 全局：同步播放 / 暂停全部 6 轨
@@ -215,7 +258,7 @@ export default function Home() {
     <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black p-4 min-h-screen">
       <main className="flex flex-1 w-full max-w-3xl flex-col items-center gap-8 py-12 px-8 bg-white dark:bg-zinc-900 rounded-2xl shadow-xl">
         <h1 className="text-3xl font-bold text-zinc-800 dark:text-white">
-          Sound Studio ......
+          Sound Studio ###############
         </h1>
 
         {/* 上传区域 */}
