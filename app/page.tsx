@@ -13,7 +13,6 @@ export default function Home() {
   const [file, setFile] = useState<File | null>(null)
   const [status, setStatus] = useState<string>('')
   const [loading, setLoading] = useState<boolean>(false)
-  const [taskId, setTaskId] = useState<string | null>(null)
   const [chords, setChords] = useState<Array<{ time: number; chord: string }> | null>(null)
   const [tracks, setTracks] = useState<Record<string, string>>({})
 
@@ -31,7 +30,7 @@ export default function Home() {
 
       const interval = setInterval(async () => {
         attempts++
-        setStatus(`[3/3] Modal GPU 正在拆分与分析和弦... (已等待 ${attempts * 3} 秒)`)
+        setStatus(`[3/3] 音轨拆分与和弦识别中... (已等待 ${attempts * 3} 秒)`)
 
         const { data, error } = await supabase.storage
           .from('separated-tracks')
@@ -43,7 +42,7 @@ export default function Home() {
           resolve(JSON.parse(text))
         } else if (attempts >= maxAttempts) {
           clearInterval(interval)
-          reject(new Error('处理超时，请前往 Modal 仪表盘检查日志'))
+          reject(new Error('处理超时，请稍后重试'))
         }
       }, 3000)
     })
@@ -64,7 +63,6 @@ export default function Home() {
       const randomStr = Math.random().toString(36).substring(2, 7)
       const filename = `${timestamp}_${randomStr}.mp3`
       const currentTaskId = `${timestamp}_${randomStr}`
-      setTaskId(currentTaskId)
 
       setStatus('[1/3] 正在上传原音频到 Supabase...')
 
@@ -77,7 +75,7 @@ export default function Home() {
 
       if (uploadError) throw new Error(`上传失败: ${uploadError.message}`)
 
-      setStatus('[2/3] 音频上传成功，正在调起 Modal 云端 GPU 异步处理...')
+      setStatus('[2/3] 上传成功，正在调起 Modal 云端 GPU 异步处理...')
 
       const res = await fetch(MODAL_ENDPOINT, {
         method: 'POST',
@@ -89,10 +87,9 @@ export default function Home() {
 
       // 异步触发后，开始轮询等待结果
       const chordData = await pollForResults(currentTaskId)
-
       setChords(chordData)
 
-      // 组装 6 轨音频的公开下载/播放 URL
+      // 组装 6 轨音频的公开 URL
       const trackNames = ['vocals', 'guitar', 'bass', 'drums', 'piano', 'other']
       const trackUrls: Record<string, string> = {}
 
@@ -116,60 +113,94 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen p-8 max-w-3xl mx-auto space-y-6">
-      <h1 className="text-2xl font-bold">🎸 吉他和弦分离与 6 轨播放工具</h1>
+    <main className="min-h-screen bg-slate-950 text-slate-100 p-6 md:p-12">
+      <div className="max-w-4xl mx-auto space-y-8">
 
-      <div className="p-6 border rounded-lg bg-slate-50 space-y-4">
-        <input
-          type="file"
-          accept="audio/*"
-          onChange={handleFileChange}
-          disabled={loading}
-          className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
-        />
+        {/* 标题区 */}
+        <div className="text-center space-y-2">
+          <h1 className="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
+            🎸 吉他和弦分离与 6 轨播放工具
+          </h1>
+          <p className="text-slate-400 text-sm">基于 Modal 云端 GPU 算力与 Demucs AI 模型打造</p>
+        </div>
 
-        <button
-          onClick={handleProcess}
-          disabled={!file || loading}
-          className="w-full py-2 px-4 bg-blue-600 text-white rounded-lg disabled:opacity-50 hover:bg-blue-700 font-medium"
-        >
-          {loading ? 'AI 处理中 (请勿关闭页面)...' : '开始上传并分离识别'}
-        </button>
+        {/* 上传控制面板 */}
+        <div className="p-6 bg-slate-900 border border-slate-800 rounded-2xl shadow-xl space-y-4">
+          <div className="flex flex-col sm:flex-row items-center gap-4">
+            <label className="w-full sm:w-auto cursor-pointer px-4 py-2.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2">
+              <span>选择文件</span>
+              <input
+                type="file"
+                accept="audio/*"
+                onChange={handleFileChange}
+                disabled={loading}
+                className="hidden"
+              />
+            </label>
+            <span className="text-sm text-slate-400 truncate max-w-xs">
+              {file ? file.name : '未选择任何音频文件'}
+            </span>
+          </div>
 
-        {status && (
-          <p className="text-sm font-mono text-slate-600 mt-2">{status}</p>
+          <button
+            onClick={handleProcess}
+            disabled={!file || loading}
+            className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:hover:bg-blue-600 text-white font-semibold rounded-xl shadow-lg transition duration-200"
+          >
+            {loading ? 'AI 正在全力处理中...' : '开始上传并分离识别'}
+          </button>
+
+          {status && (
+            <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl text-xs font-mono text-blue-400">
+              {status}
+            </div>
+          )}
+        </div>
+
+        {/* 6 音轨独立播放器面板 */}
+        {Object.keys(tracks).length > 0 && (
+          <div className="p-6 bg-slate-900 border border-slate-800 rounded-2xl shadow-xl space-y-4">
+            <h2 className="text-lg font-bold text-slate-200 flex items-center gap-2">
+              <span>🎵</span> 6 轨分离音轨
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {Object.entries(tracks).map(([trackName, url]) => (
+                <div key={trackName} className="p-4 bg-slate-950 border border-slate-800/80 rounded-xl space-y-2">
+                  <div className="flex justify-between items-center">
+                    <span className="font-semibold capitalize text-sm text-blue-300">{trackName}</span>
+                    <a
+                      href={url}
+                      download={`${trackName}.wav`}
+                      className="text-xs text-slate-400 hover:text-white underline"
+                    >
+                      下载
+                    </a>
+                  </div>
+                  <audio controls src={url} className="w-full h-9 accent-blue-500" />
+                </div>
+              ))}
+            </div>
+          </div>
         )}
+
+        {/* 和弦识别结果展示面板 */}
+        {chords && chords.length > 0 && (
+          <div className="p-6 bg-slate-900 border border-slate-800 rounded-2xl shadow-xl space-y-4">
+            <h2 className="text-lg font-bold text-slate-200 flex items-center gap-2">
+              <span>🎸</span> 吉他和弦时间轴 (共 {chords.length} 段)
+            </h2>
+            <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-2.5 font-mono text-sm max-h-72 overflow-y-auto pr-1">
+              {chords.map((item, index) => (
+                <div key={index} className="p-2.5 bg-slate-950 border border-slate-800 rounded-xl text-center flex flex-col justify-center">
+                  <span className="text-xs text-slate-500">{item.time}s</span>
+                  <span className="text-base font-bold text-blue-400 mt-0.5">{item.chord}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
       </div>
-
-      {/* 6 轨分离音频播放器 */}
-      {Object.keys(tracks).length > 0 && (
-        <div className="p-6 border rounded-lg bg-white space-y-4">
-          <h2 className="text-lg font-bold">🎵 6 轨分离音轨</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {Object.entries(tracks).map(([trackName, url]) => (
-              <div key={trackName} className="p-3 border rounded bg-slate-50 space-y-2">
-                <span className="font-semibold capitalize text-sm text-slate-700">{trackName}</span>
-                <audio controls src={url} className="w-full h-10" />
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* 和弦识别结果展示 */}
-      {chords && chords.length > 0 && (
-        <div className="p-6 border rounded-lg bg-white space-y-4">
-          <h2 className="text-lg font-bold">🎸 识别结果 (共 {chords.length} 段和弦):</h2>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 font-mono text-sm max-h-60 overflow-y-auto">
-            {chords.map((item, index) => (
-              <div key={index} className="p-2 border rounded bg-slate-50 text-center">
-                <span className="text-gray-500">{item.time}s: </span>
-                <span className="font-bold text-blue-600">{item.chord}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
     </main>
   )
 }
