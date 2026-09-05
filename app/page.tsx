@@ -9,6 +9,7 @@ interface Track {
   url: string;
   volume: number; // 0 到 1
   isMuted: boolean;
+  isPlaying: boolean; // 🆕 增加单轨播放状态
 }
 
 const DEFAULT_TRACKS = [
@@ -30,7 +31,7 @@ export default function Home() {
   const [statusMsg, setStatusMsg] = useState('');
 
   // 🆕 多轨播放控制状态
-  const [isPlaying, setIsPlaying] = useState(false);
+  const [isPlayingAll, setIsPlayingAll] = useState(false);
   const [tracks, setTracks] = useState<Track[]>([]);
   const audioRefs = useRef<{ [key: string]: HTMLAudioElement | null }>({});
 
@@ -45,7 +46,7 @@ export default function Home() {
     setAudioUrl(URL.createObjectURL(file));
     setStatusMsg('');
     setTracks([]); // 清空之前的多轨
-    setIsPlaying(false);
+    setIsPlayingAll(false);
   }, [audioUrl]);
 
   const handleDragEnter = (e: React.DragEvent) => { e.preventDefault(); setIsDragging(true); };
@@ -59,46 +60,72 @@ export default function Home() {
     if (e.target.files && e.target.files.length > 0) handleFile(e.target.files[0]);
   };
 
-  // 🚀 本地测试模式：不调用后端 API，直接加载 public/demo-tracks/ 下的文件
+  // 本地测试模式：加载 public/demo-tracks/ 下的 .wav 文件
   const handleStartSeparation = async () => {
     setIsProcessing(true);
     setStatusMsg('🎵 本地演示模式：正在载入 public/demo-tracks 预设音轨...');
 
-    // 模拟 1.5 秒的 AI 运算等待效果
     setTimeout(() => {
       const loadedTracks: Track[] = DEFAULT_TRACKS.map((t) => ({
         id: t.id,
         name: t.name,
-        // 如果您的文件是 .wav 格式，请把下方的 .mp3 改成 .wav
         url: `/demo-tracks/${t.file}`,
         volume: 0.8,
         isMuted: false,
+        isPlaying: false,
       }));
 
       setTracks(loadedTracks);
       setStatusMsg('✅ 音轨加载完成！已载入 6 轨 Mixer 混音控制台');
       setIsProcessing(false);
-    }, 1500);
+    }, 1200);
   };
 
-  // 🎵 播放 / 暂停控制（同步音量与对齐）
+  // 🎵 全局：播放 / 暂停全部 6 轨（同步对齐）
   const togglePlayAll = () => {
-    const nextPlayingState = !isPlaying;
-    setIsPlaying(nextPlayingState);
+    const nextState = !isPlayingAll;
+    setIsPlayingAll(nextState);
+
+    setTracks((prev) =>
+      prev.map((t) => ({ ...t, isPlaying: nextState }))
+    );
 
     tracks.forEach((track) => {
       const audio = audioRefs.current[track.id];
       if (audio) {
-        if (nextPlayingState) {
-          audio.volume = track.isMuted ? 0 : track.volume; // 👈 补上这一行：确保播放时把音量正确同步给原生 DOM
-          audio.currentTime = 0; // 强制对齐
-          audio.play().catch((err) => console.error("播放被拦截或文件不存在:", err));
+        if (nextState) {
+          audio.volume = track.isMuted ? 0 : track.volume;
+          audio.currentTime = 0; // 同步对齐
+          audio.play().catch((err) => console.error('播放拦截:', err));
         } else {
           audio.pause();
         }
       }
     });
   };
+
+  // 🎵 单轨：独立控制单个音轨的播放 / 暂停
+  const togglePlaySingleTrack = (id: string) => {
+    setTracks((prev) =>
+      prev.map((t) => {
+        if (t.id === id) {
+          const nextPlaying = !t.isPlaying;
+          const audio = audioRefs.current[id];
+          if (audio) {
+            if (nextPlaying) {
+              audio.volume = t.isMuted ? 0 : t.volume;
+              audio.play().catch((err) => console.error('播放拦截:', err));
+            } else {
+              audio.pause();
+            }
+          }
+          return { ...t, isPlaying: nextPlaying };
+        }
+        return t;
+      })
+    );
+  };
+
   // 🎚️ 调整单个音轨的音量
   const handleVolumeChange = (id: string, newVolume: number) => {
     setTracks((prev) =>
@@ -182,7 +209,7 @@ export default function Home() {
                 onClick={togglePlayAll}
                 className="px-6 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-full shadow-md transition-all"
               >
-                {isPlaying ? '⏸️ 暂停全部' : '▶️ 同步播放全部'}
+                {isPlayingAll ? '⏸️ 暂停全部' : '▶️ 同步播放全部'}
               </button>
             </div>
 
@@ -193,26 +220,45 @@ export default function Home() {
                   key={track.id}
                   className="p-4 rounded-xl bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700/50 flex flex-col gap-3"
                 >
-                  {/* HTML5 Audio 标签 */}
                   <audio
                     ref={(el) => { audioRefs.current[track.id] = el; }}
                     src={track.url}
                     preload="auto"
+                    onEnded={() => {
+                      // 单轨播放结束自动复位按钮
+                      setTracks((prev) =>
+                        prev.map((t) => (t.id === track.id ? { ...t, isPlaying: false } : t))
+                      );
+                    }}
                   />
 
                   <div className="flex items-center justify-between">
                     <span className="font-semibold text-sm text-zinc-700 dark:text-zinc-200">
                       {track.name}
                     </span>
-                    <button
-                      onClick={() => toggleMute(track.id)}
-                      className={`text-xs px-2.5 py-1 rounded font-medium transition-all ${track.isMuted
-                        ? 'bg-red-500 text-white'
-                        : 'bg-zinc-200 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-300'
-                        }`}
-                    >
-                      {track.isMuted ? '已静音 Muted' : 'Mute'}
-                    </button>
+
+                    {/* 右侧控制按钮组：单轨播放 + 静音 */}
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => togglePlaySingleTrack(track.id)}
+                        className={`text-xs px-2.5 py-1 rounded font-medium transition-all ${track.isPlaying
+                          ? 'bg-amber-500 text-white'
+                          : 'bg-zinc-200 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-300'
+                          }`}
+                      >
+                        {track.isPlaying ? '⏸️ 暂停' : '▶️ 播放'}
+                      </button>
+
+                      <button
+                        onClick={() => toggleMute(track.id)}
+                        className={`text-xs px-2.5 py-1 rounded font-medium transition-all ${track.isMuted
+                          ? 'bg-red-500 text-white'
+                          : 'bg-zinc-200 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-300'
+                          }`}
+                      >
+                        {track.isMuted ? '已静音' : 'Mute'}
+                      </button>
+                    </div>
                   </div>
 
                   {/* 音量滑块推子 */}
