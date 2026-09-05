@@ -81,23 +81,24 @@ export default function Home() {
     }, 1500);
   };
 
-  // 🎵 播放 / 暂停控制（支持 6 轨同步对齐）
+  // 🎵 播放 / 暂停控制（同步音量与对齐）
   const togglePlayAll = () => {
     const nextPlayingState = !isPlaying;
     setIsPlaying(nextPlayingState);
 
-    Object.values(audioRefs.current).forEach((audio) => {
+    tracks.forEach((track) => {
+      const audio = audioRefs.current[track.id];
       if (audio) {
         if (nextPlayingState) {
-          audio.currentTime = 0; // 强制从头播放以确保 6 轨绝对零延迟对齐
-          audio.play();
+          audio.volume = track.isMuted ? 0 : track.volume; // 👈 补上这一行：确保播放时把音量正确同步给原生 DOM
+          audio.currentTime = 0; // 强制对齐
+          audio.play().catch((err) => console.error("播放被拦截或文件不存在:", err));
         } else {
           audio.pause();
         }
       }
     });
   };
-
   // 🎚️ 调整单个音轨的音量
   const handleVolumeChange = (id: string, newVolume: number) => {
     setTracks((prev) =>
