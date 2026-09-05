@@ -25,12 +25,12 @@ interface ChordItem {
 }
 
 const DEFAULT_TRACK_CONFIGS = [
-  { id: 'vocals', name: '🎤 人声 (Vocals)', file: 'vocals.wav' },
-  { id: 'guitar', name: '🎸 吉他 (Guitar)', file: 'guitar.wav' },
-  { id: 'bass', name: '🎸 贝斯 (Bass)', file: 'bass.wav' },
-  { id: 'drums', name: '🥁 爵士鼓 (Drums)', file: 'drums.wav' },
-  { id: 'piano', name: '🎹 钢琴 (Piano)', file: 'piano.wav' },
-  { id: 'other', name: '🎼 其他 (Other)', file: 'other.wav' },
+  { id: 'vocals', name: '🎤 人声 (Vocals)', file: 'vocals.mp3' },
+  { id: 'guitar', name: '🎸 吉他 (Guitar)', file: 'guitar.mp3' },
+  { id: 'bass', name: '🎸 贝斯 (Bass)', file: 'bass.mp3' },
+  { id: 'drums', name: '🥁 爵士鼓 (Drums)', file: 'drums.mp3' },
+  { id: 'piano', name: '🎹 钢琴 (Piano)', file: 'piano.mp3' },
+  { id: 'other', name: '🎼 其他 (Other)', file: 'other.mp3' },
 ];
 
 export default function Home() {
