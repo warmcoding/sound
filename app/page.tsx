@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback } from 'react';
 
 // 定义 6 声道结构
 interface Track {
@@ -9,12 +9,13 @@ interface Track {
   url: string;
   volume: number;
   isMuted: boolean;
+  isPlaying: boolean; // 🆕 单轨播放状态
 }
 
 // 定义和弦结构 (时间戳 + 和弦)
 interface ChordItem {
   time: number; // 开始时间（秒）
-  chord: string; // 和弦名称，如 C, G, Am, F
+  chord: string; // 和弦名称
 }
 
 const DEFAULT_TRACKS = [
@@ -26,7 +27,7 @@ const DEFAULT_TRACKS = [
   { id: 'other', name: '🎼 其他 (Other)', file: 'other.wav' },
 ];
 
-// 🎸 Mock 的 chords.json 识别数据（之后可由 API 动态获取）
+// 🎸 Mock 的 chords.json 识别数据
 const MOCK_CHORDS: ChordItem[] = [
   { time: 0, chord: 'C' },
   { time: 4, chord: 'G' },
@@ -92,6 +93,7 @@ export default function Home() {
         url: `/demo-tracks/${t.file}`,
         volume: 0.8,
         isMuted: false,
+        isPlaying: false,
       }));
 
       setTracks(loadedTracks);
@@ -101,10 +103,12 @@ export default function Home() {
     }, 1200);
   };
 
-  // 🎵 1. 全局同步播放 / 暂停
+  // 🎵 1. 全局：同步播放 / 暂停全部 6 轨
   const togglePlayAll = () => {
     const nextState = !isPlayingAll;
     setIsPlayingAll(nextState);
+
+    setTracks((prev) => prev.map((t) => ({ ...t, isPlaying: nextState })));
 
     tracks.forEach((track) => {
       const audio = audioRefs.current[track.id];
@@ -119,7 +123,29 @@ export default function Home() {
     });
   };
 
-  // 🎚️ 2. 全局 Seek 进度跳转（所有 6 轨同步对齐）
+  // 🎵 2. 单轨：独立控制单个音轨播放 / 暂停
+  const togglePlaySingleTrack = (id: string) => {
+    setTracks((prev) =>
+      prev.map((t) => {
+        if (t.id === id) {
+          const nextPlaying = !t.isPlaying;
+          const audio = audioRefs.current[id];
+          if (audio) {
+            if (nextPlaying) {
+              audio.volume = t.isMuted ? 0 : t.volume;
+              audio.play().catch((err) => console.error('播放拦截:', err));
+            } else {
+              audio.pause();
+            }
+          }
+          return { ...t, isPlaying: nextPlaying };
+        }
+        return t;
+      })
+    );
+  };
+
+  // 🎚️ 3. 全局 Seek 进度跳转（所有 6 轨同步对齐）
   const handleSeek = (newTime: number) => {
     setCurrentTime(newTime);
     tracks.forEach((track) => {
@@ -130,10 +156,9 @@ export default function Home() {
     });
   };
 
-  // ⏱️ 3. 实时监听时间变化（驱动进度条与和弦高亮）
+  // ⏱️ 4. 实时监听时间变化
   const handleTimeUpdate = (e: React.SyntheticEvent<HTMLAudioElement>) => {
     const audio = e.currentTarget;
-    // 使用人声轨或第一个轨作为主时间线（Master Clock）
     if (audio && !isNaN(audio.currentTime)) {
       setCurrentTime(audio.currentTime);
       if (audio.duration && !isNaN(audio.duration)) {
@@ -166,7 +191,7 @@ export default function Home() {
     );
   };
 
-  // 格式化时间辅助函数 (秒 -> 00:00)
+  // 格式化时间 (秒 -> 00:00)
   const formatTime = (timeInSeconds: number) => {
     if (isNaN(timeInSeconds)) return '00:00';
     const minutes = Math.floor(timeInSeconds / 60);
@@ -190,7 +215,7 @@ export default function Home() {
     <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black p-4 min-h-screen">
       <main className="flex flex-1 w-full max-w-3xl flex-col items-center gap-8 py-12 px-8 bg-white dark:bg-zinc-900 rounded-2xl shadow-xl">
         <h1 className="text-3xl font-bold text-zinc-800 dark:text-white">
-          Sound Studio ....
+          Sound Studio
         </h1>
 
         {/* 上传区域 */}
@@ -235,7 +260,7 @@ export default function Home() {
         {tracks.length > 0 && (
           <div className="w-full flex flex-col gap-6 border-t border-zinc-200 dark:border-zinc-800 pt-6">
 
-            {/* 1. 🎸 🆕 实时和弦跟弹卡片区 (Chord Sheet) */}
+            {/* 1. 🎸 实时和弦跟弹卡片区 (Chord Sheet) */}
             <div className="flex flex-col gap-3 bg-zinc-900 text-white p-5 rounded-2xl shadow-inner">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold text-zinc-400 tracking-wider uppercase">
@@ -269,7 +294,7 @@ export default function Home() {
               </div>
             </div>
 
-            {/* 2. 🎚️ 🆕 全局进度条 (Timeline / Seek) */}
+            {/* 2. 🎚️ 全局进度条 (Timeline / Seek) */}
             <div className="flex flex-col gap-2 bg-zinc-50 dark:bg-zinc-800/40 p-4 rounded-xl border border-zinc-200 dark:border-zinc-700/50">
               <div className="flex items-center justify-between text-xs font-mono text-zinc-500">
                 <span>{formatTime(currentTime)}</span>
@@ -294,7 +319,7 @@ export default function Home() {
               />
             </div>
 
-            {/* 3. 🎚️ 6 轨 Mixer 声道推子 */}
+            {/* 3. 🎚️ 6 轨 Mixer 声道推子（含单轨控制按钮） */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {tracks.map((track) => (
                 <div
@@ -305,23 +330,41 @@ export default function Home() {
                     ref={(el) => { audioRefs.current[track.id] = el; }}
                     src={track.url}
                     preload="auto"
-                    onTimeUpdate={track.id === 'vocals' ? handleTimeUpdate : undefined} // 用人声轨驱动时间线
-                    onEnded={() => setIsPlayingAll(false)}
+                    onTimeUpdate={track.id === 'vocals' ? handleTimeUpdate : undefined}
+                    onEnded={() => {
+                      setTracks((prev) =>
+                        prev.map((t) => (t.id === track.id ? { ...t, isPlaying: false } : t))
+                      );
+                    }}
                   />
 
                   <div className="flex items-center justify-between">
                     <span className="font-semibold text-sm text-zinc-700 dark:text-zinc-200">
                       {track.name}
                     </span>
-                    <button
-                      onClick={() => toggleMute(track.id)}
-                      className={`text-xs px-2.5 py-1 rounded font-medium transition-all ${track.isMuted
-                        ? 'bg-red-500 text-white'
-                        : 'bg-zinc-200 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-300'
-                        }`}
-                    >
-                      {track.isMuted ? '已静音' : 'Mute'}
-                    </button>
+
+                    {/* 🆕 右侧控制按钮组：单轨播放 + 静音 */}
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => togglePlaySingleTrack(track.id)}
+                        className={`text-xs px-2.5 py-1 rounded font-medium transition-all ${track.isPlaying
+                          ? 'bg-amber-500 text-white'
+                          : 'bg-zinc-200 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-300'
+                          }`}
+                      >
+                        {track.isPlaying ? '⏸️ 暂停' : '▶️ 播放'}
+                      </button>
+
+                      <button
+                        onClick={() => toggleMute(track.id)}
+                        className={`text-xs px-2.5 py-1 rounded font-medium transition-all ${track.isMuted
+                          ? 'bg-red-500 text-white'
+                          : 'bg-zinc-200 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-300'
+                          }`}
+                      >
+                        {track.isMuted ? '已静音' : 'Mute'}
+                      </button>
+                    </div>
                   </div>
 
                   {/* 音量滑块 */}
