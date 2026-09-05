@@ -1,7 +1,6 @@
-'use client'
-
-import { useState } from 'react'
-import { createClient } from '@supabase/supabase-js'
+'use client';
+import { createClient } from '@supabase/supabase-js';
+import { useState, useRef, useCallback } from 'react';
 
 const SUPABASE_URL = "https://teuhgretiiawyjtkuzkh.supabase.co"
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRldWhncmV0aWlhd3lqdGt1emtoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg0MzE1OTUsImV4cCI6MjEwNDAwNzU5NX0.ElBYECVaWA0SLLWgSHgI7zaDFNdrG15DEkZ2U3RU7iA"
@@ -9,198 +8,452 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY)
 
 const MODAL_ENDPOINT = "https://warmcoding--guitar-chord-separator-trigger-process.modal.run"
 
+// 定义 6 声道结构
+interface Track {
+  id: string;
+  name: string;
+  url: string;
+  volume: number;
+  isMuted: boolean;
+  isPlaying: boolean;
+}
+
+// 定义和弦结构 (时间戳 + 和弦)
+interface ChordItem {
+  time: number;
+  chord: string;
+}
+
+const DEFAULT_TRACK_CONFIGS = [
+  { id: 'vocals', name: '🎤 人声 (Vocals)', file: 'vocals.wav' },
+  { id: 'guitar', name: '🎸 吉他 (Guitar)', file: 'guitar.wav' },
+  { id: 'bass', name: '🎸 贝斯 (Bass)', file: 'bass.wav' },
+  { id: 'drums', name: '🥁 爵士鼓 (Drums)', file: 'drums.wav' },
+  { id: 'piano', name: '🎹 钢琴 (Piano)', file: 'piano.wav' },
+  { id: 'other', name: '🎼 其他 (Other)', file: 'other.wav' },
+];
+
 export default function Home() {
-  const [file, setFile] = useState<File | null>(null)
-  const [status, setStatus] = useState<string>('')
-  const [loading, setLoading] = useState<boolean>(false)
-  const [chords, setChords] = useState<Array<{ time: number; chord: string }> | null>(null)
-  const [tracks, setTracks] = useState<Record<string, string>>({})
+  const [audioFile, setAudioFile] = useState<File | null>(null);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      setFile(e.target.files[0])
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [statusMsg, setStatusMsg] = useState('');
+
+  // 多轨与播放时间状态
+  const [isPlayingAll, setIsPlayingAll] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [tracks, setTracks] = useState<Track[]>([]);
+  const [chords, setChords] = useState<ChordItem[]>([]);
+  const audioRefs = useRef<{ [key: string]: HTMLAudioElement | null }>({});
+
+  // 处理文件上传选择
+  const handleFile = useCallback((file: File) => {
+    if (!file.type.startsWith('audio/')) {
+      alert('请上传音频文件！');
+      return;
     }
-  }
+    if (audioUrl) URL.revokeObjectURL(audioUrl);
+    setAudioFile(file);
+    setAudioUrl(URL.createObjectURL(file));
+    setStatusMsg('');
+    setTracks([]);
+    setIsPlayingAll(false);
+  }, [audioUrl]);
 
-  // 轮询检查结果
+  const handleDragEnter = (e: React.DragEvent) => { e.preventDefault(); setIsDragging(true); };
+  const handleDragLeave = (e: React.DragEvent) => { e.preventDefault(); setIsDragging(false); };
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    if (e.dataTransfer.files.length > 0) handleFile(e.dataTransfer.files[0]);
+  };
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) handleFile(e.target.files[0]);
+  };
+
+  // 轮询检查 Modal 异步处理结果
   const pollForResults = (currentTaskId: string) => {
-    return new Promise<any[]>((resolve, reject) => {
-      let attempts = 0
-      const maxAttempts = 120 // 最多等待 6 分钟
+    return new Promise<ChordItem[]>((resolve, reject) => {
+      let attempts = 0;
+      const maxAttempts = 120; // 最多等待 6 分钟
 
       const interval = setInterval(async () => {
-        attempts++
-        setStatus(`[3/3] 音轨拆分与和弦识别中... (已等待 ${attempts * 3} 秒)`)
+        attempts++;
+        setStatusMsg(`[3/3] Modal GPU 正在后台进行 6 轨拆分与和弦识别... (已等待 ${attempts * 3} 秒)`);
 
         const { data, error } = await supabase.storage
           .from('separated-tracks')
-          .download(`results/${currentTaskId}/chords.json`)
+          .download(`results/${currentTaskId}/chords.json`);
 
         if (data && !error) {
-          clearInterval(interval)
-          const text = await data.text()
-          resolve(JSON.parse(text))
+          clearInterval(interval);
+          const text = await data.text();
+          resolve(JSON.parse(text));
         } else if (attempts >= maxAttempts) {
-          clearInterval(interval)
-          reject(new Error('处理超时，请稍后重试'))
+          clearInterval(interval);
+          reject(new Error('处理超时，请前往 Modal 仪表盘检查日志'));
         }
-      }, 3000)
-    })
-  }
+      }, 3000);
+    });
+  };
 
-  const handleProcess = async () => {
-    if (!file) {
-      alert('请先选择一个 MP3 音频文件')
-      return
+  // 🚀 核心真实业务流程：上传至 Supabase + 调起 Modal GPU + 轮询获取音轨和弦
+  const handleStartSeparation = async () => {
+    if (!audioFile) {
+      alert('请先选择或拖拽音频文件！');
+      return;
     }
 
+    setIsProcessing(true);
+    setStatusMsg('[1/3] 正在上传原音频到 Supabase 云端存储...');
+
     try {
-      setLoading(true)
-      setChords(null)
-      setTracks({})
+      const timestamp = Date.now();
+      const randomStr = Math.random().toString(36).substring(2, 7);
+      const filename = `${timestamp}_${randomStr}.mp3`;
+      const currentTaskId = `${timestamp}_${randomStr}`;
 
-      const timestamp = Date.now()
-      const randomStr = Math.random().toString(36).substring(2, 7)
-      const filename = `${timestamp}_${randomStr}.mp3`
-      const currentTaskId = `${timestamp}_${randomStr}`
-
-      setStatus('[1/3] 正在上传原音频到 Supabase...')
-
+      // 1. 上传文件到 Supabase original-audio Bucket
       const { error: uploadError } = await supabase.storage
         .from('original-audio')
-        .upload(`uploads/${filename}`, file, {
-          contentType: file.type || 'audio/mpeg',
+        .upload(`uploads/${filename}`, audioFile, {
+          contentType: audioFile.type || 'audio/mpeg',
           upsert: true,
-        })
+        });
 
-      if (uploadError) throw new Error(`上传失败: ${uploadError.message}`)
+      if (uploadError) throw new Error(`上传失败: ${uploadError.message}`);
 
-      setStatus('[2/3] 上传成功，正在调起 Modal 云端 GPU 异步处理...')
+      setStatusMsg('[2/3] 上传成功！正在调起 Modal 云端 GPU 异步处理...');
 
+      // 2. 调起 Modal 异步后端
       const res = await fetch(MODAL_ENDPOINT, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ filename }),
-      })
+      });
 
-      if (!res.ok) throw new Error('调起 Modal 失败')
+      if (!res.ok) throw new Error('调起 Modal 失败');
 
-      // 异步触发后，开始轮询等待结果
-      const chordData = await pollForResults(currentTaskId)
-      setChords(chordData)
+      // 3. 轮询等待后端处理完成并拿回和弦数据
+      const chordData = await pollForResults(currentTaskId);
+      setChords(chordData);
 
-      // 组装 6 轨音频的公开 URL
-      const trackNames = ['vocals', 'guitar', 'bass', 'drums', 'piano', 'other']
-      const trackUrls: Record<string, string> = {}
-
-      for (const track of trackNames) {
+      // 4. 组装 6 轨音频的真实公开播放 URL
+      const loadedTracks: Track[] = DEFAULT_TRACK_CONFIGS.map((t) => {
         const { data } = supabase.storage
           .from('separated-tracks')
-          .getPublicUrl(`results/${currentTaskId}/${track}.wav`)
-        if (data?.publicUrl) {
-          trackUrls[track] = data.publicUrl
+          .getPublicUrl(`results/${currentTaskId}/${t.file}`);
+
+        return {
+          id: t.id,
+          name: t.name,
+          url: data?.publicUrl || '',
+          volume: 0.8,
+          isMuted: false,
+          isPlaying: false,
+        };
+      });
+
+      setTracks(loadedTracks);
+      setStatusMsg('🎉 音轨拆分与和弦识别完成！已进入跟弹模式');
+    } catch (err: any) {
+      console.error(err);
+      setStatusMsg(`❌ 发生错误: ${err.message}`);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // 🎵 1. 全局：同步播放 / 暂停全部 6 轨
+  const togglePlayAll = () => {
+    const nextState = !isPlayingAll;
+    setIsPlayingAll(nextState);
+
+    setTracks((prev) => prev.map((t) => ({ ...t, isPlaying: nextState })));
+
+    tracks.forEach((track) => {
+      const audio = audioRefs.current[track.id];
+      if (audio) {
+        if (nextState) {
+          audio.volume = track.isMuted ? 0 : track.volume;
+          audio.play().catch((err) => console.error('播放拦截:', err));
+        } else {
+          audio.pause();
         }
       }
-      setTracks(trackUrls)
+    });
+  };
 
-      setStatus('🎉 音轨拆分与和弦识别完成！')
-    } catch (err: any) {
-      console.error(err)
-      setStatus(`❌ 发生错误: ${err.message}`)
-    } finally {
-      setLoading(false)
+  // 🎵 2. 单轨：独立控制单个音轨播放 / 暂停
+  const togglePlaySingleTrack = (id: string) => {
+    setTracks((prev) =>
+      prev.map((t) => {
+        if (t.id === id) {
+          const nextPlaying = !t.isPlaying;
+          const audio = audioRefs.current[id];
+          if (audio) {
+            if (nextPlaying) {
+              audio.volume = t.isMuted ? 0 : t.volume;
+              audio.play().catch((err) => console.error('播放拦截:', err));
+            } else {
+              audio.pause();
+            }
+          }
+          return { ...t, isPlaying: nextPlaying };
+        }
+        return t;
+      })
+    );
+  };
+
+  // 🎚️ 3. 全局 Seek 进度跳转（所有 6 轨同步对齐）
+  const handleSeek = (newTime: number) => {
+    setCurrentTime(newTime);
+    tracks.forEach((track) => {
+      const audio = audioRefs.current[track.id];
+      if (audio) {
+        audio.currentTime = newTime;
+      }
+    });
+  };
+
+  // ⏱️ 4. 实时监听时间变化
+  const handleTimeUpdate = (e: React.SyntheticEvent<HTMLAudioElement>) => {
+    const audio = e.currentTarget;
+    if (audio && !isNaN(audio.currentTime)) {
+      setCurrentTime(audio.currentTime);
+      if (audio.duration && !isNaN(audio.duration)) {
+        setDuration(audio.duration);
+      }
     }
-  }
+  };
+
+  // 🎚️ 调整单个音轨音量
+  const handleVolumeChange = (id: string, newVolume: number) => {
+    setTracks((prev) =>
+      prev.map((t) => (t.id === id ? { ...t, volume: newVolume } : t))
+    );
+    const audio = audioRefs.current[id];
+    if (audio) audio.volume = newVolume;
+  };
+
+  // 🔇 单轨静音（Mute）
+  const toggleMute = (id: string) => {
+    setTracks((prev) =>
+      prev.map((t) => {
+        if (t.id === id) {
+          const nextMute = !t.isMuted;
+          const audio = audioRefs.current[id];
+          if (audio) audio.muted = nextMute;
+          return { ...t, isMuted: nextMute };
+        }
+        return t;
+      })
+    );
+  };
+
+  // 格式化时间 (秒 -> 00:00)
+  const formatTime = (timeInSeconds: number) => {
+    if (isNaN(timeInSeconds)) return '00:00';
+    const minutes = Math.floor(timeInSeconds / 60);
+    const seconds = Math.floor(timeInSeconds % 60);
+    return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  };
+
+  // 🔍 获得当前时刻正在生效的和弦
+  const getCurrentChordIndex = () => {
+    if (!chords.length) return 0;
+    for (let i = chords.length - 1; i >= 0; i--) {
+      if (currentTime >= chords[i].time) {
+        return i;
+      }
+    }
+    return 0;
+  };
+
+  const activeChordIdx = getCurrentChordIndex();
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-100 p-6 md:p-12">
-      <div className="max-w-4xl mx-auto space-y-8">
+    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black p-4 min-h-screen">
+      <main className="flex flex-1 w-full max-w-3xl flex-col items-center gap-8 py-12 px-8 bg-white dark:bg-zinc-900 rounded-2xl shadow-xl">
+        <h1 className="text-3xl font-bold text-zinc-800 dark:text-white">
+          🎸 吉他和弦分离与 6 轨播放工具
+        </h1>
 
-        {/* 标题区 */}
-        <div className="text-center space-y-2">
-          <h1 className="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
-            🎸 吉他和弦分离与 6 轨播放工具
-          </h1>
-          <p className="text-slate-400 text-sm">基于 Modal 云端 GPU 算力与 Demucs AI 模型打造</p>
+        {/* 上传区域 */}
+        <div
+          onDragEnter={handleDragEnter}
+          onDragLeave={handleDragLeave}
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={handleDrop}
+          onClick={() => fileInputRef.current?.click()}
+          className={`w-full h-36 flex flex-col items-center justify-center border-2 border-dashed rounded-xl cursor-pointer transition-all ${isDragging
+            ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+            : 'border-zinc-300 dark:border-zinc-700 hover:border-zinc-400'
+            }`}
+        >
+          <input ref={fileInputRef} type="file" accept="audio/*" onChange={handleFileSelect} className="hidden" />
+          <p className="text-base font-medium text-zinc-600 dark:text-zinc-300">
+            {isDragging ? '松开鼠标上传' : '拖拽音频文件到这里，或点击选择'}
+          </p>
         </div>
 
-        {/* 上传控制面板 */}
-        <div className="p-6 bg-slate-900 border border-slate-800 rounded-2xl shadow-xl space-y-4">
-          <div className="flex flex-col sm:flex-row items-center gap-4">
-            <label className="w-full sm:w-auto cursor-pointer px-4 py-2.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2">
-              <span>选择文件</span>
-              <input
-                type="file"
-                accept="audio/*"
-                onChange={handleFileChange}
-                disabled={loading}
-                className="hidden"
-              />
-            </label>
-            <span className="text-sm text-slate-400 truncate max-w-xs">
-              {file ? file.name : '未选择任何音频文件'}
-            </span>
+        {/* 原音频操作区 */}
+        {audioUrl && (
+          <div className="w-full flex flex-col gap-3">
+            <p className="text-xs text-zinc-400 truncate">当前文件: {audioFile?.name}</p>
+            <button
+              onClick={handleStartSeparation}
+              disabled={isProcessing}
+              className={`w-full py-3 rounded-lg text-base font-semibold transition-all ${isProcessing ? 'bg-zinc-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg'
+                }`}
+            >
+              {isProcessing ? 'AI 正在全力处理中 (请勿关闭)...' : '🚀 开始 6 轨云端拆分与和弦跟弹'}
+            </button>
+            {statusMsg && (
+              <div className="text-center p-2 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-xs font-mono font-medium text-blue-600 dark:text-blue-400">
+                {statusMsg}
+              </div>
+            )}
           </div>
+        )}
 
-          <button
-            onClick={handleProcess}
-            disabled={!file || loading}
-            className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:hover:bg-blue-600 text-white font-semibold rounded-xl shadow-lg transition duration-200"
-          >
-            {loading ? 'AI 正在全力处理中...' : '开始上传并分离识别'}
-          </button>
+        {/* 🎛️ 多轨控制台 + 和弦跟弹区 */}
+        {tracks.length > 0 && (
+          <div className="w-full flex flex-col gap-6 border-t border-zinc-200 dark:border-zinc-800 pt-6">
 
-          {status && (
-            <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl text-xs font-mono text-blue-400">
-              {status}
-            </div>
-          )}
-        </div>
+            {/* 1. 🎸 实时和弦跟弹卡片区 (Chord Sheet) */}
+            <div className="flex flex-col gap-3 bg-zinc-900 text-white p-5 rounded-2xl shadow-inner">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-zinc-400 tracking-wider uppercase">
+                  🎸 实时跟弹和弦 (Chord Sheet)
+                </span>
+                <span className="text-xs text-emerald-400 font-mono">
+                  当前和弦: {chords[activeChordIdx]?.chord || '--'}
+                </span>
+              </div>
 
-        {/* 6 音轨独立播放器面板 */}
-        {Object.keys(tracks).length > 0 && (
-          <div className="p-6 bg-slate-900 border border-slate-800 rounded-2xl shadow-xl space-y-4">
-            <h2 className="text-lg font-bold text-slate-200 flex items-center gap-2">
-              <span>🎵</span> 6 轨分离音轨
-            </h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {Object.entries(tracks).map(([trackName, url]) => (
-                <div key={trackName} className="p-4 bg-slate-950 border border-slate-800/80 rounded-xl space-y-2">
-                  <div className="flex justify-between items-center">
-                    <span className="font-semibold capitalize text-sm text-blue-300">{trackName}</span>
-                    <a
-                      href={url}
-                      download={`${trackName}.wav`}
-                      className="text-xs text-slate-400 hover:text-white underline"
+              {/* 横向滚动和弦卡片 */}
+              <div className="flex items-center gap-3 overflow-x-auto py-2 no-scrollbar">
+                {chords.map((item, index) => {
+                  const isActive = index === activeChordIdx;
+                  return (
+                    <div
+                      key={index}
+                      onClick={() => handleSeek(item.time)}
+                      className={`flex flex-col items-center justify-center min-w-[70px] h-20 rounded-xl cursor-pointer transition-all ${isActive
+                        ? 'bg-blue-600 text-white scale-105 shadow-lg shadow-blue-500/50 ring-2 ring-blue-400'
+                        : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200'
+                        }`}
                     >
-                      下载
-                    </a>
+                      <span className="text-2xl font-black">{item.chord}</span>
+                      <span className="text-[10px] opacity-70 font-mono mt-1">
+                        {formatTime(item.time)}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* 2. 🎚️ 全局进度条 (Timeline / Seek) */}
+            <div className="flex flex-col gap-2 bg-zinc-50 dark:bg-zinc-800/40 p-4 rounded-xl border border-zinc-200 dark:border-zinc-700/50">
+              <div className="flex items-center justify-between text-xs font-mono text-zinc-500">
+                <span>{formatTime(currentTime)}</span>
+                <button
+                  onClick={togglePlayAll}
+                  className="px-6 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-full shadow-md transition-all text-sm"
+                >
+                  {isPlayingAll ? '⏸️ 暂停全部' : '▶️ 同步播放全部'}
+                </button>
+                <span>{formatTime(duration)}</span>
+              </div>
+
+              {/* 拖拽进度条 */}
+              <input
+                type="range"
+                min="0"
+                max={duration || 100}
+                step="0.1"
+                value={currentTime}
+                onChange={(e) => handleSeek(parseFloat(e.target.value))}
+                className="w-full h-2 bg-zinc-200 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-blue-600"
+              />
+            </div>
+
+            {/* 3. 🎚️ 6 轨 Mixer 声道推子（含单轨控制按钮） */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {tracks.map((track) => (
+                <div
+                  key={track.id}
+                  className="p-4 rounded-xl bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700/50 flex flex-col gap-3"
+                >
+                  <audio
+                    ref={(el) => { audioRefs.current[track.id] = el; }}
+                    src={track.url}
+                    preload="auto"
+                    onTimeUpdate={track.id === 'vocals' ? handleTimeUpdate : undefined}
+                    onEnded={() => {
+                      setTracks((prev) =>
+                        prev.map((t) => (t.id === track.id ? { ...t, isPlaying: false } : t))
+                      );
+                    }}
+                  />
+
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-sm text-zinc-700 dark:text-zinc-200">
+                      {track.name}
+                    </span>
+
+                    {/* 右侧控制按钮组：单轨播放 + 静音 */}
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => togglePlaySingleTrack(track.id)}
+                        className={`text-xs px-2.5 py-1 rounded font-medium transition-all ${track.isPlaying
+                          ? 'bg-amber-500 text-white'
+                          : 'bg-zinc-200 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-300'
+                          }`}
+                      >
+                        {track.isPlaying ? '⏸️ 暂停' : '▶️ 播放'}
+                      </button>
+
+                      <button
+                        onClick={() => toggleMute(track.id)}
+                        className={`text-xs px-2.5 py-1 rounded font-medium transition-all ${track.isMuted
+                          ? 'bg-red-500 text-white'
+                          : 'bg-zinc-200 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-300'
+                          }`}
+                      >
+                        {track.isMuted ? '已静音' : 'Mute'}
+                      </button>
+                    </div>
                   </div>
-                  <audio controls src={url} className="w-full h-9 accent-blue-500" />
+
+                  {/* 音量滑块 */}
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-zinc-400">🔈</span>
+                    <input
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.01"
+                      value={track.isMuted ? 0 : track.volume}
+                      onChange={(e) => handleVolumeChange(track.id, parseFloat(e.target.value))}
+                      className="w-full h-1.5 bg-zinc-300 dark:bg-zinc-600 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                    />
+                    <span className="text-xs text-zinc-400">🔊</span>
+                  </div>
                 </div>
               ))}
             </div>
+
           </div>
         )}
-
-        {/* 和弦识别结果展示面板 */}
-        {chords && chords.length > 0 && (
-          <div className="p-6 bg-slate-900 border border-slate-800 rounded-2xl shadow-xl space-y-4">
-            <h2 className="text-lg font-bold text-slate-200 flex items-center gap-2">
-              <span>🎸</span> 吉他和弦时间轴 (共 {chords.length} 段)
-            </h2>
-            <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-2.5 font-mono text-sm max-h-72 overflow-y-auto pr-1">
-              {chords.map((item, index) => (
-                <div key={index} className="p-2.5 bg-slate-950 border border-slate-800 rounded-xl text-center flex flex-col justify-center">
-                  <span className="text-xs text-slate-500">{item.time}s</span>
-                  <span className="text-base font-bold text-blue-400 mt-0.5">{item.chord}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-      </div>
-    </main>
-  )
+      </main>
+    </div>
+  );
 }
