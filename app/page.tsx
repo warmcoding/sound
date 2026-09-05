@@ -215,7 +215,7 @@ export default function Home() {
     <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black p-4 min-h-screen">
       <main className="flex flex-1 w-full max-w-3xl flex-col items-center gap-8 py-12 px-8 bg-white dark:bg-zinc-900 rounded-2xl shadow-xl">
         <h1 className="text-3xl font-bold text-zinc-800 dark:text-white">
-          Sound Studio ..
+          Sound Studio .....
         </h1>
 
         {/* 上传区域 */}
