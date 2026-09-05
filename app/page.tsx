@@ -9,16 +9,15 @@ interface Track {
   url: string;
   volume: number; // 0 到 1
   isMuted: boolean;
-  audioRef?: HTMLAudioElement | null;
 }
 
 const DEFAULT_TRACKS = [
-  { id: 'vocals', name: '🎤 人声 (Vocals)' },
-  { id: 'guitar', name: '🎸 吉他 (Guitar)' },
-  { id: 'bass', name: '🎸 贝斯 (Bass)' },
-  { id: 'drums', name: '🥁 爵士鼓 (Drums)' },
-  { id: 'piano', name: '🎹 钢琴 (Piano)' },
-  { id: 'other', name: '🎼 其他 (Other)' },
+  { id: 'vocals', name: '🎤 人声 (Vocals)', file: 'vocals.mp3' },
+  { id: 'guitar', name: '🎸 吉他 (Guitar)', file: 'guitar.mp3' },
+  { id: 'bass', name: '🎸 贝斯 (Bass)', file: 'bass.mp3' },
+  { id: 'drums', name: '🥁 爵士鼓 (Drums)', file: 'drums.mp3' },
+  { id: 'piano', name: '🎹 钢琴 (Piano)', file: 'piano.mp3' },
+  { id: 'other', name: '🎼 其他 (Other)', file: 'other.mp3' },
 ];
 
 export default function Home() {
@@ -30,7 +29,7 @@ export default function Home() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
 
-  // 🆕 新增：多轨播放控制状态
+  // 🆕 多轨播放控制状态
   const [isPlaying, setIsPlaying] = useState(false);
   const [tracks, setTracks] = useState<Track[]>([]);
   const audioRefs = useRef<{ [key: string]: HTMLAudioElement | null }>({});
@@ -60,45 +59,26 @@ export default function Home() {
     if (e.target.files && e.target.files.length > 0) handleFile(e.target.files[0]);
   };
 
-  // 🚀 核心逻辑修改：请求 API 获取 6 轨 MP3 链接列表，并加载到页面
+  // 🚀 本地测试模式：不调用后端 API，直接加载 public/demo-tracks/ 下的文件
   const handleStartSeparation = async () => {
-    if (!audioFile) return;
     setIsProcessing(true);
-    setStatusMsg('🎵 AI 正在提纯 6 声道音轨，请稍候...');
+    setStatusMsg('🎵 本地演示模式：正在载入 public/demo-tracks 预设音轨...');
 
-    const formData = new FormData();
-    formData.append('file', audioFile);
-
-    try {
-      const response = await fetch('/api/process-audio', {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || '处理失败');
-      }
-
-      // 假设后端返回 JSON，结构如: { tracks: { vocals: "http...", guitar: "http..." } }
-      const data = await response.json();
-
-      // 初始化 6 音轨状态
+    // 模拟 1.5 秒的 AI 运算等待效果
+    setTimeout(() => {
       const loadedTracks: Track[] = DEFAULT_TRACKS.map((t) => ({
-        ...t,
-        url: data.tracks[t.id],
+        id: t.id,
+        name: t.name,
+        // 如果您的文件是 .wav 格式，请把下方的 .mp3 改成 .wav
+        url: `/demo-tracks/${t.file}`,
         volume: 0.8,
         isMuted: false,
       }));
 
       setTracks(loadedTracks);
-      setStatusMsg('✅ 音轨分离完成！已载入 6 轨 Mixer 混音器');
-    } catch (error: any) {
-      console.error(error);
-      setStatusMsg(`❌ 处理失败: ${error.message}`);
-    } finally {
+      setStatusMsg('✅ 音轨加载完成！已载入 6 轨 Mixer 混音控制台');
       setIsProcessing(false);
-    }
+    }, 1500);
   };
 
   // 🎵 播放 / 暂停控制（支持 6 轨同步对齐）
@@ -159,8 +139,8 @@ export default function Home() {
           onDrop={handleDrop}
           onClick={() => fileInputRef.current?.click()}
           className={`w-full h-40 flex flex-col items-center justify-center border-2 border-dashed rounded-xl cursor-pointer transition-all ${isDragging
-              ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-              : 'border-zinc-300 dark:border-zinc-700 hover:border-zinc-400'
+            ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+            : 'border-zinc-300 dark:border-zinc-700 hover:border-zinc-400'
             }`}
         >
           <input ref={fileInputRef} type="file" accept="audio/*" onChange={handleFileSelect} className="hidden" />
@@ -179,7 +159,7 @@ export default function Home() {
               className={`w-full py-3 rounded-lg text-base font-semibold transition-all ${isProcessing ? 'bg-zinc-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg'
                 }`}
             >
-              {isProcessing ? 'AI 拆轨中...' : '🚀 开始 6 轨拆分'}
+              {isProcessing ? '加载中...' : '🚀 开始 6 轨拆分 (测试)'}
             </button>
             {statusMsg && (
               <div className="text-center p-2 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-xs font-medium text-zinc-600 dark:text-zinc-300">
@@ -189,7 +169,7 @@ export default function Home() {
           </div>
         )}
 
-        {/* 🎚️ 🆕 6 轨 Mixer 多轨混音控制台 */}
+        {/* 🎚️ 6 轨 Mixer 多轨混音控制台 */}
         {tracks.length > 0 && (
           <div className="w-full flex flex-col gap-6 mt-4 border-t border-zinc-200 dark:border-zinc-800 pt-6">
             <div className="flex items-center justify-between">
@@ -212,7 +192,7 @@ export default function Home() {
                   key={track.id}
                   className="p-4 rounded-xl bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700/50 flex flex-col gap-3"
                 >
-                  {/* 隐藏的 HTML5 Audio 标签，用于同步控音 */}
+                  {/* HTML5 Audio 标签 */}
                   <audio
                     ref={(el) => { audioRefs.current[track.id] = el; }}
                     src={track.url}
@@ -226,8 +206,8 @@ export default function Home() {
                     <button
                       onClick={() => toggleMute(track.id)}
                       className={`text-xs px-2.5 py-1 rounded font-medium transition-all ${track.isMuted
-                          ? 'bg-red-500 text-white'
-                          : 'bg-zinc-200 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-300'
+                        ? 'bg-red-500 text-white'
+                        : 'bg-zinc-200 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-300'
                         }`}
                     >
                       {track.isMuted ? '已静音 Muted' : 'Mute'}
