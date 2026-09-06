@@ -631,7 +631,7 @@ export default function Home() {
               </button>
               <button
                 onClick={() => {
-                  alert('正在接入支付网关，敬请期待...');
+                  alert('正在接入支付网关，敬请期待..');
                   setShowPricingModal(false);
                 }}
                 className="flex-1 py-2.5 rounded-xl bg-blue-600 text-white font-medium hover:bg-blue-700 transition-colors shadow-lg shadow-blue-600/30"
