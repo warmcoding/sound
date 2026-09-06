@@ -58,23 +58,16 @@ export default function Home() {
   // 获取用户剩余额度函数
   // 获取用户剩余额度函数（安全兜底版）
   const fetchUserCredits = async (userId: string) => {
+    console.log("正在查询的用户 ID:", userId); // 打开浏览器 F12 控制台查看打印的 ID 是否和数据库中的 id 完全一致
     const { data, error } = await supabase
       .from('user_credits')
       .select('credits')
       .eq('id', userId)
       .maybeSingle();
 
+    console.log("查询结果:", data, error);
     if (data) {
       setUserCredits(data.credits);
-    } else {
-      // 如果表中没有该用户的记录，自动帮他插入一条初始 2 次的记录
-      const { data: insertData } = await supabase
-        .from('user_credits')
-        .insert([{ id: userId, credits: 2 }])
-        .select('credits')
-        .maybeSingle();
-
-      setUserCredits(insertData ? insertData.credits : 2);
     }
   };
   // 1. 初始化检查登录状态并加载额度
