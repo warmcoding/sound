@@ -24,6 +24,15 @@ interface ChordItem {
   chord: string;
 }
 
+// 定义历史作品记录结构
+interface HistoryItem {
+  id: string;
+  file_name: string;
+  result_url: string;
+  created_at: string;
+  status: string;
+}
+
 const DEFAULT_TRACK_CONFIGS = [
   { id: 'vocals', name: '🎤 人声 (Vocals)', file: 'vocals.mp3' },
   { id: 'guitar', name: '🎸 吉他 (Guitar)', file: 'guitar.mp3' },
@@ -47,6 +56,9 @@ export default function Home() {
   const [userCredits, setUserCredits] = useState<number | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
 
+  // 📂 我的作品历史记录状态
+  const [historyList, setHistoryList] = useState<HistoryItem[]>([]);
+
   // 💰 次数耗尽充值弹窗状态
   const [showPricingModal, setShowPricingModal] = useState(false);
 
@@ -58,9 +70,9 @@ export default function Home() {
   const [chords, setChords] = useState<ChordItem[]>([]);
   const audioRefs = useRef<{ [key: string]: HTMLAudioElement | null }>({});
 
-  // 获取用户剩余额度函数（安全兜底版）
+  // 获取用户剩余额度函数
   const fetchUserCredits = async (userId: string) => {
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from('user_credits')
       .select('credits')
       .eq('id', userId)
@@ -71,12 +83,26 @@ export default function Home() {
     }
   };
 
-  // 1. 初始化检查登录状态并加载额度
+  // 获取用户的历史作品记录函数
+  const fetchUserHistory = async (userEmail: string) => {
+    const { data, error } = await supabase
+      .from('user_history')
+      .select('*')
+      .eq('user_email', userEmail)
+      .order('created_at', { ascending: false });
+
+    if (!error && data) {
+      setHistoryList(data);
+    }
+  };
+
+  // 1. 初始化检查登录状态并加载额度与历史记录
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data: { user } }) => {
       setUser(user);
       if (user) {
         await fetchUserCredits(user.id);
+        if (user.email) await fetchUserHistory(user.email);
       }
       setAuthLoading(false);
     });
@@ -86,8 +112,10 @@ export default function Home() {
       setUser(currentUser);
       if (currentUser) {
         await fetchUserCredits(currentUser.id);
+        if (currentUser.email) await fetchUserHistory(currentUser.email);
       } else {
         setUserCredits(null);
+        setHistoryList([]);
       }
     });
 
@@ -109,6 +137,7 @@ export default function Home() {
     await supabase.auth.signOut();
     setUser(null);
     setUserCredits(null);
+    setHistoryList([]);
   };
 
   // 💳 Stripe 结账跳转函数
@@ -124,7 +153,7 @@ export default function Home() {
     });
     const data = await res.json();
     if (data.url) {
-      window.location.href = data.url; // 跳转到 Stripe 官方托管的支付页面
+      window.location.href = data.url;
     } else {
       alert(data.error || '创建支付订单失败');
     }
@@ -151,7 +180,6 @@ export default function Home() {
     e.preventDefault();
     setIsDragging(false);
 
-    // 🔒 次数校验：若为0或空则拦截并弹窗
     if (userCredits !== null && userCredits <= 0) {
       setShowPricingModal(true);
       return;
@@ -168,7 +196,7 @@ export default function Home() {
   const pollForResults = (currentTaskId: string) => {
     return new Promise<ChordItem[]>((resolve, reject) => {
       let attempts = 0;
-      const maxAttempts = 120; // 最多等待 6 分钟
+      const maxAttempts = 120;
 
       const interval = setInterval(async () => {
         attempts++;
@@ -190,16 +218,14 @@ export default function Home() {
     });
   };
 
-  // 🚀 核心真实业务流程：校验额度 -> 扣减额度 -> 上传 -> 调起 Modal GPU
+  // 🚀 核心真实业务流程
   const handleStartSeparation = async () => {
-    // 🔐 前置校验：必须先登录
     if (!user) {
       alert('请先使用 Google 账号快捷登录（新用户自动赠送 2 次免费体验）！');
       handleGoogleLogin();
       return;
     }
 
-    // 💰 额度校验：检查剩余次数
     if (userCredits === null || userCredits <= 0) {
       setShowPricingModal(true);
       return;
@@ -214,7 +240,6 @@ export default function Home() {
     setStatusMsg('[0/3] 正在扣除 1 次使用额度...');
 
     try {
-      // 1. 扣除 1 次用户额度
       const newCredits = userCredits - 1;
       const { error: updateError } = await supabase
         .from('user_credits')
@@ -231,7 +256,6 @@ export default function Home() {
       const filename = `${timestamp}_${randomStr}.mp3`;
       const currentTaskId = `${timestamp}_${randomStr}`;
 
-      // 2. 上传文件到 Supabase original-audio Bucket
       const { error: uploadError } = await supabase.storage
         .from('original-audio')
         .upload(`uploads/${filename}`, audioFile, {
@@ -243,7 +267,6 @@ export default function Home() {
 
       setStatusMsg('[2/3] 上传成功！正在调起 Modal 云端 GPU 异步处理...');
 
-      // 3. 调起 Modal 异步后端
       const res = await fetch(MODAL_ENDPOINT, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -252,11 +275,9 @@ export default function Home() {
 
       if (!res.ok) throw new Error('调起 Modal 失败');
 
-      // 4. 轮询等待后端处理完成并拿回和弦数据
       const chordData = await pollForResults(currentTaskId);
       setChords(chordData);
 
-      // 5. 组装 6 轨音频的真实公开播放 URL
       const loadedTracks: Track[] = DEFAULT_TRACK_CONFIGS.map((t) => {
         const { data } = supabase.storage
           .from('separated-tracks')
@@ -273,6 +294,22 @@ export default function Home() {
       });
 
       setTracks(loadedTracks);
+
+      // 📥 处理完成后自动向 `user_history` 表插入记录
+      if (user.email) {
+        const { error: historyError } = await supabase.from('user_history').insert([
+          {
+            user_email: user.email,
+            file_name: audioFile.name,
+            result_url: loadedTracks[0]?.url || '#', // 记录第一个音轨或结果路径
+            status: 'success'
+          }
+        ]);
+        if (!historyError) {
+          fetchUserHistory(user.email); // 刷新历史记录列表
+        }
+      }
+
       setStatusMsg('🎉 音轨拆分与和弦识别完成！已进入跟弹模式');
     } catch (err: any) {
       console.error(err);
@@ -282,7 +319,6 @@ export default function Home() {
     }
   };
 
-  // 🎵 1. 全局：同步播放 / 暂停全部 6 轨
   const togglePlayAll = () => {
     const nextState = !isPlayingAll;
     setIsPlayingAll(nextState);
@@ -302,7 +338,6 @@ export default function Home() {
     });
   };
 
-  // 🎵 2. 单轨：独立控制单个音轨播放 / 暂停
   const togglePlaySingleTrack = (id: string) => {
     setTracks((prev) =>
       prev.map((t) => {
@@ -324,7 +359,6 @@ export default function Home() {
     );
   };
 
-  // 🎚️ 3. 全局 Seek 进度跳转（所有 6 轨同步对齐）
   const handleSeek = (newTime: number) => {
     setCurrentTime(newTime);
     tracks.forEach((track) => {
@@ -335,7 +369,6 @@ export default function Home() {
     });
   };
 
-  // ⏱️ 4. 实时监听时间变化
   const handleTimeUpdate = (e: React.SyntheticEvent<HTMLAudioElement>) => {
     const audio = e.currentTarget;
     if (audio && !isNaN(audio.currentTime)) {
@@ -346,7 +379,6 @@ export default function Home() {
     }
   };
 
-  // 🎚️ 调整单个音轨音量
   const handleVolumeChange = (id: string, newVolume: number) => {
     setTracks((prev) =>
       prev.map((t) => (t.id === id ? { ...t, volume: newVolume } : t))
@@ -355,7 +387,6 @@ export default function Home() {
     if (audio) audio.volume = newVolume;
   };
 
-  // 🔇 单轨静音（Mute）
   const toggleMute = (id: string) => {
     setTracks((prev) =>
       prev.map((t) => {
@@ -370,7 +401,6 @@ export default function Home() {
     );
   };
 
-  // 格式化时间 (秒 -> 00:00)
   const formatTime = (timeInSeconds: number) => {
     if (isNaN(timeInSeconds)) return '00:00';
     const minutes = Math.floor(timeInSeconds / 60);
@@ -378,7 +408,6 @@ export default function Home() {
     return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
   };
 
-  // 🔍 获得当前时刻正在生效的和弦
   const getCurrentChordIndex = () => {
     if (!chords.length) return 0;
     for (let i = chords.length - 1; i >= 0; i--) {
@@ -393,7 +422,7 @@ export default function Home() {
 
   return (
     <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black p-4 min-h-screen relative">
-      {/* 顶部导航条：登录状态与剩余额度展示 */}
+      {/* 顶部导航条 */}
       <div className="w-full max-w-3xl flex justify-between items-center mb-4 px-2">
         <span className="text-sm font-semibold text-zinc-600 dark:text-zinc-400">🎸 AI 音乐云端拆分与跟弹</span>
         <div>
@@ -437,7 +466,6 @@ export default function Home() {
           onDragOver={(e) => e.preventDefault()}
           onDrop={handleDrop}
           onClick={() => {
-            // 🔒 额度耗尽拦截并弹出充值窗口
             if (userCredits !== null && userCredits <= 0) {
               setShowPricingModal(true);
               return;
@@ -484,8 +512,6 @@ export default function Home() {
         {/* 🎛️ 多轨控制台 + 和弦跟弹区 */}
         {tracks.length > 0 && (
           <div className="w-full flex flex-col gap-6 border-t border-zinc-200 dark:border-zinc-800 pt-6">
-
-            {/* 1. 🎸 实时和弦跟弹卡片区 (Chord Sheet) */}
             <div className="flex flex-col gap-3 bg-zinc-900 text-white p-5 rounded-2xl shadow-inner">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold text-zinc-400 tracking-wider uppercase">
@@ -496,7 +522,6 @@ export default function Home() {
                 </span>
               </div>
 
-              {/* 横向滚动和弦卡片 */}
               <div className="flex items-center gap-3 overflow-x-auto py-2 no-scrollbar">
                 {chords.map((item, index) => {
                   const isActive = index === activeChordIdx;
@@ -519,7 +544,6 @@ export default function Home() {
               </div>
             </div>
 
-            {/* 2. 🎚️ 全局进度条 (Timeline / Seek) */}
             <div className="flex flex-col gap-2 bg-zinc-50 dark:bg-zinc-800/40 p-4 rounded-xl border border-zinc-200 dark:border-zinc-700/50">
               <div className="flex items-center justify-between text-xs font-mono text-zinc-500">
                 <span>{formatTime(currentTime)}</span>
@@ -532,7 +556,6 @@ export default function Home() {
                 <span>{formatTime(duration)}</span>
               </div>
 
-              {/* 拖拽进度条 */}
               <input
                 type="range"
                 min="0"
@@ -544,7 +567,6 @@ export default function Home() {
               />
             </div>
 
-            {/* 3. 🎚️ 6 轨 Mixer 声道推子（含单轨控制按钮） */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {tracks.map((track) => (
                 <div
@@ -568,7 +590,6 @@ export default function Home() {
                       {track.name}
                     </span>
 
-                    {/* 右侧控制按钮组：单轨播放 + 静音 */}
                     <div className="flex items-center gap-2">
                       <button
                         onClick={() => togglePlaySingleTrack(track.id)}
@@ -592,7 +613,6 @@ export default function Home() {
                     </div>
                   </div>
 
-                  {/* 音量滑块 */}
                   <div className="flex items-center gap-3">
                     <span className="text-xs text-zinc-400">🔈</span>
                     <input
@@ -609,12 +629,45 @@ export default function Home() {
                 </div>
               ))}
             </div>
+          </div>
+        )}
 
+        {/* 📂 我的作品历史记录列表（放置在上传区域下方） */}
+        {user && historyList.length > 0 && (
+          <div className="w-full flex flex-col gap-3 border-t border-zinc-200 dark:border-zinc-800 pt-6">
+            <h3 className="text-base font-bold text-zinc-800 dark:text-white flex items-center gap-2">
+              📂 我的作品历史记录
+            </h3>
+            <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+              {historyList.map((item) => (
+                <div
+                  key={item.id}
+                  className="flex items-center justify-between p-3 bg-zinc-50 dark:bg-zinc-800/50 rounded-xl border border-zinc-200 dark:border-zinc-700/50 text-sm"
+                >
+                  <div className="truncate mr-2">
+                    <p className="font-medium text-zinc-800 dark:text-zinc-200 truncate">{item.file_name}</p>
+                    <span className="text-[11px] text-zinc-400 font-mono">
+                      {new Date(item.created_at).toLocaleString()}
+                    </span>
+                  </div>
+                  {item.result_url && item.result_url !== '#' && (
+                    <a
+                      href={item.result_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="px-3 py-1.5 bg-zinc-200 dark:bg-zinc-700 hover:bg-blue-600 hover:text-white text-zinc-700 dark:text-zinc-300 rounded-lg text-xs font-medium transition-all shrink-0"
+                    >
+                      查看/下载
+                    </a>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </main>
 
-      {/* 💰 次数耗尽付费引导弹窗 (对接 Stripe) */}
+      {/* 💰 次数耗尽付费引导弹窗 */}
       {showPricingModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="bg-white dark:bg-zinc-900 rounded-2xl p-6 w-96 max-w-full shadow-2xl border border-zinc-200 dark:border-zinc-800 text-center relative animate-in fade-in zoom-in duration-200">
@@ -623,10 +676,9 @@ export default function Home() {
               剩余额度使用完毕。请选择套餐进行购买。
             </p>
 
-            {/* 海外套餐选项卡片：绑定 Stripe Price ID */}
             <div className="space-y-3 mb-6 text-left">
               <div
-                onClick={() => handleCheckout('price_1UCdUGQz2VtPLHhxz4oWnvOb')} // 👈 替换为你在 Stripe 后台创建的 50次包 Price ID
+                onClick={() => handleCheckout('price_1UCdUGQz2VtPLHhxz4oWnvOb')}
                 className="p-3 border rounded-xl border-blue-500 bg-blue-50/50 dark:bg-blue-950/30 cursor-pointer flex justify-between items-center transition-all hover:scale-[1.02]"
               >
                 <div>
@@ -637,7 +689,7 @@ export default function Home() {
               </div>
 
               <div
-                onClick={() => handleCheckout('price_1UCdUhQz2VtPLHhxntVIGB5i')} // 👈 替换为你在 Stripe 后台创建的 200次包 Price ID
+                onClick={() => handleCheckout('price_1UCdUhQz2VtPLHhxntVIGB5i')}
                 className="p-3 border rounded-xl border-zinc-200 dark:border-zinc-700 hover:border-blue-500 cursor-pointer flex justify-between items-center transition-all hover:scale-[1.02]"
               >
                 <div>
