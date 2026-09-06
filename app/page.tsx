@@ -47,7 +47,7 @@ export default function Home() {
   const [userCredits, setUserCredits] = useState<number | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
 
-  //// 多轨与播放时间状态
+  //多轨与播放时间状态
   const [isPlayingAll, setIsPlayingAll] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
