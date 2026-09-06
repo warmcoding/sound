@@ -1,6 +1,6 @@
 'use client';
 import { createClient } from '@supabase/supabase-js';
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 
 const SUPABASE_URL = "https://teuhgretiiawyjtkuzkh.supabase.co"
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRldWhncmV0aWlhd3lqdGt1emtoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg0MzE1OTUsImV4cCI6MjEwNDAwNzU5NX0.ElBYECVaWA0SLLWgSHgI7zaDFNdrG15DEkZ2U3RU7iA"
@@ -42,6 +42,10 @@ export default function Home() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
 
+  // 👤 用户认证与额度状态
+  const [user, setUser] = useState<any>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
   // 多轨与播放时间状态
   const [isPlayingAll, setIsPlayingAll] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -49,6 +53,36 @@ export default function Home() {
   const [tracks, setTracks] = useState<Track[]>([]);
   const [chords, setChords] = useState<ChordItem[]>([]);
   const audioRefs = useRef<{ [key: string]: HTMLAudioElement | null }>({});
+
+  // 1. 初始化检查登录状态
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      setUser(user);
+      setAuthLoading(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // 🚀 Google 快捷登录函数
+  const handleGoogleLogin = async () => {
+    await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: window.location.origin,
+      },
+    });
+  };
+
+  // 🚪 登出函数
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setUser(null);
+  };
 
   // 处理文件上传选择
   const handleFile = useCallback((file: File) => {
@@ -103,6 +137,13 @@ export default function Home() {
 
   // 🚀 核心真实业务流程：上传至 Supabase + 调起 Modal GPU + 轮询获取音轨和弦
   const handleStartSeparation = async () => {
+    // 🔐 前置校验：必须先登录才能使用
+    if (!user) {
+      alert('为了提供高质量的云端 GPU 拆分，请先使用 Google 账号快捷登录（赠送免费完整体验）！');
+      handleGoogleLogin();
+      return;
+    }
+
     if (!audioFile) {
       alert('请先选择或拖拽音频文件！');
       return;
@@ -279,9 +320,38 @@ export default function Home() {
 
   return (
     <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black p-4 min-h-screen">
+      {/* 顶部导航条：登录状态展示 */}
+      <div className="w-full max-w-3xl flex justify-between items-center mb-4 px-2">
+        <span className="text-sm font-semibold text-zinc-600 dark:text-zinc-400">🎸 AI 音乐云端拆分与跟弹</span>
+        <div>
+          {authLoading ? (
+            <span className="text-xs text-zinc-400">加载中...</span>
+          ) : user ? (
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-emerald-500 font-medium truncate max-w-[180px]">
+                👤 {user.email || user.user_metadata?.full_name || '已登录用户'}
+              </span>
+              <button
+                onClick={handleLogout}
+                className="text-xs px-3 py-1.5 rounded-md bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-300 transition-all"
+              >
+                登出
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={handleGoogleLogin}
+              className="text-xs px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium shadow transition-all flex items-center gap-1.5"
+            >
+              🔐 Google 快捷登录 (免费试用)
+            </button>
+          )}
+        </div>
+      </div>
+
       <main className="flex flex-1 w-full max-w-3xl flex-col items-center gap-8 py-12 px-8 bg-white dark:bg-zinc-900 rounded-2xl shadow-xl">
         <h1 className="text-3xl font-bold text-zinc-800 dark:text-white">
-          🎸 吉他和弦
+          吉他和弦
         </h1>
 
         {/* 上传区域 */}
@@ -312,7 +382,7 @@ export default function Home() {
               className={`w-full py-3 rounded-lg text-base font-semibold transition-all ${isProcessing ? 'bg-zinc-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg'
                 }`}
             >
-              {isProcessing ? 'AI 正在全力处理中 (请勿关闭)...' : '🚀 开始 6 轨云端拆分与和弦跟弹'}
+              {isProcessing ? 'AI 正在全力处理中 (请勿关闭)...' : user ? '🚀 开始 6 轨云端拆分与和弦跟弹' : '🔐 登录后开始 6 轨云端拆分'}
             </button>
             {statusMsg && (
               <div className="text-center p-2 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-xs font-mono font-medium text-blue-600 dark:text-blue-400">
