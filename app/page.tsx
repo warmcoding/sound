@@ -47,6 +47,9 @@ export default function Home() {
   const [userCredits, setUserCredits] = useState<number | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
 
+  // 💰 次数耗尽充值弹窗状态
+  const [showPricingModal, setShowPricingModal] = useState(false);
+
   //多轨与播放时间状态
   const [isPlayingAll, setIsPlayingAll] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -55,21 +58,19 @@ export default function Home() {
   const [chords, setChords] = useState<ChordItem[]>([]);
   const audioRefs = useRef<{ [key: string]: HTMLAudioElement | null }>({});
 
-  // 获取用户剩余额度函数
   // 获取用户剩余额度函数（安全兜底版）
   const fetchUserCredits = async (userId: string) => {
-    console.log("正在查询的用户 ID:", userId); // 打开浏览器 F12 控制台查看打印的 ID 是否和数据库中的 id 完全一致
     const { data, error } = await supabase
       .from('user_credits')
       .select('credits')
       .eq('id', userId)
       .maybeSingle();
 
-    console.log("查询结果:", data, error);
     if (data) {
       setUserCredits(data.credits);
     }
   };
+
   // 1. 初始化检查登录状态并加载额度
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data: { user } }) => {
@@ -126,11 +127,20 @@ export default function Home() {
 
   const handleDragEnter = (e: React.DragEvent) => { e.preventDefault(); setIsDragging(true); };
   const handleDragLeave = (e: React.DragEvent) => { e.preventDefault(); setIsDragging(false); };
+
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
+
+    // 🔒 次数校验：若为0或空则拦截并弹窗
+    if (userCredits !== null && userCredits <= 0) {
+      setShowPricingModal(true);
+      return;
+    }
+
     if (e.dataTransfer.files.length > 0) handleFile(e.dataTransfer.files[0]);
   };
+
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) handleFile(e.target.files[0]);
   };
@@ -172,7 +182,7 @@ export default function Home() {
 
     // 💰 额度校验：检查剩余次数
     if (userCredits === null || userCredits <= 0) {
-      alert('您的免费体验次数已用完（剩余 0 次），请充值或联系管理员获取更多额度！');
+      setShowPricingModal(true);
       return;
     }
 
@@ -363,7 +373,7 @@ export default function Home() {
   const activeChordIdx = getCurrentChordIndex();
 
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black p-4 min-h-screen">
+    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black p-4 min-h-screen relative">
       {/* 顶部导航条：登录状态与剩余额度展示 */}
       <div className="w-full max-w-3xl flex justify-between items-center mb-4 px-2">
         <span className="text-sm font-semibold text-zinc-600 dark:text-zinc-400">🎸 AI 音乐云端拆分与跟弹</span>
@@ -407,7 +417,14 @@ export default function Home() {
           onDragLeave={handleDragLeave}
           onDragOver={(e) => e.preventDefault()}
           onDrop={handleDrop}
-          onClick={() => fileInputRef.current?.click()}
+          onClick={() => {
+            // 🔒 额度耗尽拦截并弹出充值窗口
+            if (userCredits !== null && userCredits <= 0) {
+              setShowPricingModal(true);
+              return;
+            }
+            fileInputRef.current?.click();
+          }}
           className={`w-full h-36 flex flex-col items-center justify-center border-2 border-dashed rounded-xl cursor-pointer transition-all ${isDragging
             ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
             : 'border-zinc-300 dark:border-zinc-700 hover:border-zinc-400'
@@ -434,7 +451,7 @@ export default function Home() {
                 : !user
                   ? '🔐 登录后开始 6 轨云端拆分 (送 2 次)'
                   : userCredits !== null && userCredits <= 0
-                    ? '❌ 免费额度已用完（请充值）'
+                    ? '❌ 免费额度已用完（请点击充值）'
                     : `🚀 开始 6 轨云端拆分与和弦跟弹 (消耗 1 次, 剩余 ${userCredits})`}
             </button>
             {statusMsg && (
@@ -577,6 +594,54 @@ export default function Home() {
           </div>
         )}
       </main>
+
+      {/* 💰 次数耗尽付费引导弹窗 */}
+      {showPricingModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-white dark:bg-zinc-900 rounded-2xl p-6 w-96 max-w-full shadow-2xl border border-zinc-200 dark:border-zinc-800 text-center relative animate-in fade-in zoom-in duration-200">
+            <h3 className="text-xl font-bold text-zinc-900 dark:text-white mb-2">次数已用完</h3>
+            <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-6">
+              剩余额度使用完毕。请选择付费包购买额度。
+            </p>
+
+            {/* 套餐选项示例 */}
+            <div className="space-y-3 mb-6 text-left">
+              <div className="p-3 border rounded-xl border-blue-500 bg-blue-50/50 dark:bg-blue-950/30 cursor-pointer flex justify-between items-center transition-all">
+                <div>
+                  <div className="font-semibold text-zinc-800 dark:text-zinc-200">基础包 (50次)</div>
+                  <div className="text-xs text-zinc-500">适合日常练琴使用</div>
+                </div>
+                <span className="font-bold text-blue-600 text-lg">¥ 19.9</span>
+              </div>
+              <div className="p-3 border rounded-xl border-zinc-200 dark:border-zinc-700 hover:border-blue-500 cursor-pointer flex justify-between items-center transition-all">
+                <div>
+                  <div className="font-semibold text-zinc-800 dark:text-zinc-200">畅享包 (200次)</div>
+                  <div className="text-xs text-zinc-500">超高性价比，无限畅玩</div>
+                </div>
+                <span className="font-bold text-blue-600 text-lg">¥ 49.9</span>
+              </div>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowPricingModal(false)}
+                className="flex-1 py-2.5 rounded-xl border border-zinc-300 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={() => {
+                  alert('正在接入支付网关，敬请期待...');
+                  setShowPricingModal(false);
+                }}
+                className="flex-1 py-2.5 rounded-xl bg-blue-600 text-white font-medium hover:bg-blue-700 transition-colors shadow-lg shadow-blue-600/30"
+              >
+                立即购买
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
