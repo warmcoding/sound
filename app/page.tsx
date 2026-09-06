@@ -111,6 +111,25 @@ export default function Home() {
     setUserCredits(null);
   };
 
+  // 💳 Stripe 结账跳转函数
+  const handleCheckout = async (priceId: string) => {
+    if (!user) {
+      alert('请先登录！');
+      return;
+    }
+    const res = await fetch('/api/checkout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ priceId, userId: user.id }),
+    });
+    const data = await res.json();
+    if (data.url) {
+      window.location.href = data.url; // 跳转到 Stripe 官方托管的支付页面
+    } else {
+      alert(data.error || '创建支付订单失败');
+    }
+  };
+
   // 处理文件上传选择
   const handleFile = useCallback((file: File) => {
     if (!file.type.startsWith('audio/')) {
@@ -595,30 +614,37 @@ export default function Home() {
         )}
       </main>
 
-      {/* 💰 次数耗尽付费引导弹窗 */}
+      {/* 💰 次数耗尽付费引导弹窗 (对接 Stripe) */}
       {showPricingModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="bg-white dark:bg-zinc-900 rounded-2xl p-6 w-96 max-w-full shadow-2xl border border-zinc-200 dark:border-zinc-800 text-center relative animate-in fade-in zoom-in duration-200">
             <h3 className="text-xl font-bold text-zinc-900 dark:text-white mb-2">次数已用完</h3>
             <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-6">
-              剩余额度使用完毕。请选择付费包购买额度。
+              剩余额度使用完毕。请选择套餐进行购买。
             </p>
 
-            {/* 套餐选项示例 */}
+            {/* 海外套餐选项卡片：绑定 Stripe Price ID */}
             <div className="space-y-3 mb-6 text-left">
-              <div className="p-3 border rounded-xl border-blue-500 bg-blue-50/50 dark:bg-blue-950/30 cursor-pointer flex justify-between items-center transition-all">
+              <div
+                onClick={() => handleCheckout('price_1UCdUGQz2VtPLHhxz4oWnvOb')} // 👈 替换为你在 Stripe 后台创建的 50次包 Price ID
+                className="p-3 border rounded-xl border-blue-500 bg-blue-50/50 dark:bg-blue-950/30 cursor-pointer flex justify-between items-center transition-all hover:scale-[1.02]"
+              >
                 <div>
                   <div className="font-semibold text-zinc-800 dark:text-zinc-200">基础包 (50次)</div>
-                  <div className="text-xs text-zinc-500">适合日常练琴使用</div>
+                  <div className="text-xs text-zinc-500">适合日常练习使用</div>
                 </div>
-                <span className="font-bold text-blue-600 text-lg">¥ 19.9</span>
+                <span className="font-bold text-blue-600 text-lg">$4.99</span>
               </div>
-              <div className="p-3 border rounded-xl border-zinc-200 dark:border-zinc-700 hover:border-blue-500 cursor-pointer flex justify-between items-center transition-all">
+
+              <div
+                onClick={() => handleCheckout('prod_VD3bQA4QMWr2ZB')} // 👈 替换为你在 Stripe 后台创建的 200次包 Price ID
+                className="p-3 border rounded-xl border-zinc-200 dark:border-zinc-700 hover:border-blue-500 cursor-pointer flex justify-between items-center transition-all hover:scale-[1.02]"
+              >
                 <div>
                   <div className="font-semibold text-zinc-800 dark:text-zinc-200">畅享包 (200次)</div>
                   <div className="text-xs text-zinc-500">超高性价比，无限畅玩</div>
                 </div>
-                <span className="font-bold text-blue-600 text-lg">¥ 49.9</span>
+                <span className="font-bold text-blue-600 text-lg">$12.99</span>
               </div>
             </div>
 
@@ -630,10 +656,7 @@ export default function Home() {
                 取消
               </button>
               <button
-                onClick={() => {
-                  alert('正在接入支付网关，敬请期待..');
-                  setShowPricingModal(false);
-                }}
+                onClick={() => handleCheckout('price_1Nx_xxx_basic')}
                 className="flex-1 py-2.5 rounded-xl bg-blue-600 text-white font-medium hover:bg-blue-700 transition-colors shadow-lg shadow-blue-600/30"
               >
                 立即购买
