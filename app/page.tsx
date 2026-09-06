@@ -28,7 +28,7 @@ interface ChordItem {
 interface HistoryItem {
   id: string;
   file_name: string;
-  result_url: string;
+  task_id: string; // 👈 对应后端生成的任务ID，用于拼装下载直链
   created_at: string;
   status: string;
 }
@@ -56,13 +56,14 @@ export default function Home() {
   const [userCredits, setUserCredits] = useState<number | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
 
-  // 📂 我的作品历史记录状态
+  // 📂 我的作品历史记录状态与展开项 ID
   const [historyList, setHistoryList] = useState<HistoryItem[]>([]);
+  const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null);
 
   // 💰 次数耗尽充值弹窗状态
   const [showPricingModal, setShowPricingModal] = useState(false);
 
-  //多轨与播放时间状态
+  // 多轨与播放时间状态
   const [isPlayingAll, setIsPlayingAll] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -295,13 +296,13 @@ export default function Home() {
 
       setTracks(loadedTracks);
 
-      // 📥 处理完成后自动向 `user_history` 表插入记录
+      // 📥 处理完成后自动向 `user_history` 表插入记录（带 task_id）
       if (user.email) {
         const { error: historyError } = await supabase.from('user_history').insert([
           {
             user_email: user.email,
             file_name: audioFile.name,
-            result_url: loadedTracks[0]?.url || '#', // 记录第一个音轨或结果路径
+            task_id: currentTaskId,
             status: 'success'
           }
         ]);
@@ -317,6 +318,21 @@ export default function Home() {
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  // 辅助函数：根据历史记录的 task_id 获取特定分轨或和弦的下载链接
+  const getTrackDownloadUrl = (taskId: string, fileName: string) => {
+    const { data } = supabase.storage
+      .from('separated-tracks')
+      .getPublicUrl(`results/${taskId}/${fileName}`);
+    return data.publicUrl;
+  };
+
+  const getChordDownloadUrl = (taskId: string) => {
+    const { data } = supabase.storage
+      .from('separated-tracks')
+      .getPublicUrl(`results/${taskId}/chords.json`);
+    return data.publicUrl;
   };
 
   const togglePlayAll = () => {
@@ -632,36 +648,81 @@ export default function Home() {
           </div>
         )}
 
-        {/* 📂 我的作品历史记录列表（放置在上传区域下方） */}
+        {/* 📂 我的作品历史记录列表（支持展开分轨与和弦独立下载） */}
         {user && historyList.length > 0 && (
           <div className="w-full flex flex-col gap-3 border-t border-zinc-200 dark:border-zinc-800 pt-6">
             <h3 className="text-base font-bold text-zinc-800 dark:text-white flex items-center gap-2">
-              📂 我的作品历史记录
+              📂 我的作品历史记录（含分轨与和弦下载）
             </h3>
-            <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
-              {historyList.map((item) => (
-                <div
-                  key={item.id}
-                  className="flex items-center justify-between p-3 bg-zinc-50 dark:bg-zinc-800/50 rounded-xl border border-zinc-200 dark:border-zinc-700/50 text-sm"
-                >
-                  <div className="truncate mr-2">
-                    <p className="font-medium text-zinc-800 dark:text-zinc-200 truncate">{item.file_name}</p>
-                    <span className="text-[11px] text-zinc-400 font-mono">
-                      {new Date(item.created_at).toLocaleString()}
-                    </span>
+            <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
+              {historyList.map((item) => {
+                const isExpanded = expandedHistoryId === item.id;
+                return (
+                  <div
+                    key={item.id}
+                    className="bg-zinc-50 dark:bg-zinc-800/50 rounded-xl border border-zinc-200 dark:border-zinc-700/50 overflow-hidden transition-all"
+                  >
+                    <div className="flex items-center justify-between p-3.5">
+                      <div className="truncate mr-2">
+                        <p className="font-semibold text-sm text-zinc-800 dark:text-zinc-200 truncate">
+                          {item.file_name}
+                        </p>
+                        <span className="text-[11px] text-zinc-400 font-mono">
+                          {new Date(item.created_at).toLocaleString()}
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => setExpandedHistoryId(isExpanded ? null : item.id)}
+                        className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-medium transition-all shrink-0"
+                      >
+                        {isExpanded ? '收起详情 ▲' : '查看分轨与和弦 ▼'}
+                      </button>
+                    </div>
+
+                    {/* 展开的下载面板 */}
+                    {isExpanded && (
+                      <div className="bg-zinc-100 dark:bg-zinc-900/80 p-4 border-t border-zinc-200 dark:border-zinc-700/50 flex flex-col gap-4">
+                        <div>
+                          <h4 className="text-xs font-bold text-zinc-500 dark:text-zinc-400 mb-2 uppercase tracking-wider">
+                            🎧 6 声道独立分轨下载
+                          </h4>
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                            {DEFAULT_TRACK_CONFIGS.map((trackConfig) => {
+                              const downloadUrl = getTrackDownloadUrl(item.task_id, trackConfig.file);
+                              return (
+                                <a
+                                  key={trackConfig.id}
+                                  href={downloadUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="flex items-center justify-between p-2 rounded-lg bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 hover:border-blue-500 text-xs text-zinc-700 dark:text-zinc-200 transition-all"
+                                >
+                                  <span className="truncate">{trackConfig.name.split(' ')[1]}</span>
+                                  <span className="text-blue-500 font-bold ml-1">↓ 下载</span>
+                                </a>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        <div>
+                          <h4 className="text-xs font-bold text-zinc-500 dark:text-zinc-400 mb-2 uppercase tracking-wider">
+                            🎸 吉他和弦识别数据
+                          </h4>
+                          <a
+                            href={getChordDownloadUrl(item.task_id)}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold shadow transition-all"
+                          >
+                            <span>📥 下载完整和弦数据 (chords.json)</span>
+                          </a>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  {item.result_url && item.result_url !== '#' && (
-                    <a
-                      href={item.result_url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="px-3 py-1.5 bg-zinc-200 dark:bg-zinc-700 hover:bg-blue-600 hover:text-white text-zinc-700 dark:text-zinc-300 rounded-lg text-xs font-medium transition-all shrink-0"
-                    >
-                      查看/下载
-                    </a>
-                  )}
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
