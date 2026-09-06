@@ -320,7 +320,7 @@ export default function Home() {
     }
   };
 
-  // 辅助函数：根据历史记录的 task_id 获取特定分轨或和弦的下载链接（加入空值容错判断）
+  // 辅助函数：根据历史记录的 task_id 获取特定分轨或和弦的下载链接
   const getTrackDownloadUrl = (taskId: string, fileName: string) => {
     if (!taskId) return '#';
     const { data } = supabase.storage
@@ -699,8 +699,7 @@ export default function Home() {
                                     <a
                                       key={trackConfig.id}
                                       href={downloadUrl}
-                                      target="_blank"
-                                      rel="noreferrer"
+                                      download={trackConfig.file}
                                       className="flex items-center justify-between p-2 rounded-lg bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 hover:border-blue-500 text-xs text-zinc-700 dark:text-zinc-200 transition-all"
                                     >
                                       <span className="truncate">{trackConfig.name.split(' ')[1]}</span>
@@ -717,8 +716,7 @@ export default function Home() {
                               </h4>
                               <a
                                 href={getChordDownloadUrl(item.task_id)}
-                                target="_blank"
-                                rel="noreferrer"
+                                download="chords.json"
                                 className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold shadow transition-all"
                               >
                                 <span>📥 下载完整和弦数据 (chords.json)</span>
