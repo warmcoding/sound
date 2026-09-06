@@ -637,7 +637,7 @@ export default function Home() {
               </div>
 
               <div
-                onClick={() => handleCheckout('prod_VD3bQA4QMWr2ZB')} // 👈 替换为你在 Stripe 后台创建的 200次包 Price ID
+                onClick={() => handleCheckout('price_1UCdUhQz2VtPLHhxntVIGB5i')} // 👈 替换为你在 Stripe 后台创建的 200次包 Price ID
                 className="p-3 border rounded-xl border-zinc-200 dark:border-zinc-700 hover:border-blue-500 cursor-pointer flex justify-between items-center transition-all hover:scale-[1.02]"
               >
                 <div>
