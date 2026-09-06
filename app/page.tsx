@@ -44,6 +44,7 @@ export default function Home() {
 
   // 👤 用户认证与额度状态
   const [user, setUser] = useState<any>(null);
+  const [userCredits, setUserCredits] = useState<number | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
 
   // 多轨与播放时间状态
@@ -54,15 +55,37 @@ export default function Home() {
   const [chords, setChords] = useState<ChordItem[]>([]);
   const audioRefs = useRef<{ [key: string]: HTMLAudioElement | null }>({});
 
-  // 1. 初始化检查登录状态
+  // 获取用户剩余额度函数
+  const fetchUserCredits = async (userId: string) => {
+    const { data, error } = await supabase
+      .from('user_credits')
+      .select('credits')
+      .eq('id', userId)
+      .single();
+
+    if (data && !error) {
+      setUserCredits(data.credits);
+    }
+  };
+
+  // 1. 初始化检查登录状态并加载额度
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
+    supabase.auth.getUser().then(async ({ data: { user } }) => {
       setUser(user);
+      if (user) {
+        await fetchUserCredits(user.id);
+      }
       setAuthLoading(false);
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      const currentUser = session?.user ?? null;
+      setUser(currentUser);
+      if (currentUser) {
+        await fetchUserCredits(currentUser.id);
+      } else {
+        setUserCredits(null);
+      }
     });
 
     return () => subscription.unsubscribe();
@@ -82,6 +105,7 @@ export default function Home() {
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setUser(null);
+    setUserCredits(null);
   };
 
   // 处理文件上传选择
@@ -135,12 +159,18 @@ export default function Home() {
     });
   };
 
-  // 🚀 核心真实业务流程：上传至 Supabase + 调起 Modal GPU + 轮询获取音轨和弦
+  // 🚀 核心真实业务流程：校验额度 -> 扣减额度 -> 上传 -> 调起 Modal GPU
   const handleStartSeparation = async () => {
-    // 🔐 前置校验：必须先登录才能使用
+    // 🔐 前置校验：必须先登录
     if (!user) {
-      alert('为了提供高质量的云端 GPU 拆分，请先使用 Google 账号快捷登录（赠送免费完整体验）！');
+      alert('请先使用 Google 账号快捷登录（新用户自动赠送 2 次免费体验）！');
       handleGoogleLogin();
+      return;
+    }
+
+    // 💰 额度校验：检查剩余次数
+    if (userCredits === null || userCredits <= 0) {
+      alert('您的免费体验次数已用完（剩余 0 次），请充值或联系管理员获取更多额度！');
       return;
     }
 
@@ -150,15 +180,27 @@ export default function Home() {
     }
 
     setIsProcessing(true);
-    setStatusMsg('[1/3] 正在上传原音频到 Supabase 云端存储...');
+    setStatusMsg('[0/3] 正在扣除 1 次使用额度...');
 
     try {
+      // 1. 扣除 1 次用户额度
+      const newCredits = userCredits - 1;
+      const { error: updateError } = await supabase
+        .from('user_credits')
+        .update({ credits: newCredits, updated_at: new Date().toISOString() })
+        .eq('id', user.id);
+
+      if (updateError) throw new Error(`扣除额度失败: ${updateError.message}`);
+      setUserCredits(newCredits);
+
+      setStatusMsg('[1/3] 额度扣除成功！正在上传原音频到 Supabase 云端存储...');
+
       const timestamp = Date.now();
       const randomStr = Math.random().toString(36).substring(2, 7);
       const filename = `${timestamp}_${randomStr}.mp3`;
       const currentTaskId = `${timestamp}_${randomStr}`;
 
-      // 1. 上传文件到 Supabase original-audio Bucket
+      // 2. 上传文件到 Supabase original-audio Bucket
       const { error: uploadError } = await supabase.storage
         .from('original-audio')
         .upload(`uploads/${filename}`, audioFile, {
@@ -170,7 +212,7 @@ export default function Home() {
 
       setStatusMsg('[2/3] 上传成功！正在调起 Modal 云端 GPU 异步处理...');
 
-      // 2. 调起 Modal 异步后端
+      // 3. 调起 Modal 异步后端
       const res = await fetch(MODAL_ENDPOINT, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -179,11 +221,11 @@ export default function Home() {
 
       if (!res.ok) throw new Error('调起 Modal 失败');
 
-      // 3. 轮询等待后端处理完成并拿回和弦数据
+      // 4. 轮询等待后端处理完成并拿回和弦数据
       const chordData = await pollForResults(currentTaskId);
       setChords(chordData);
 
-      // 4. 组装 6 轨音频的真实公开播放 URL
+      // 5. 组装 6 轨音频的真实公开播放 URL
       const loadedTracks: Track[] = DEFAULT_TRACK_CONFIGS.map((t) => {
         const { data } = supabase.storage
           .from('separated-tracks')
@@ -320,7 +362,7 @@ export default function Home() {
 
   return (
     <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black p-4 min-h-screen">
-      {/* 顶部导航条：登录状态展示 */}
+      {/* 顶部导航条：登录状态与剩余额度展示 */}
       <div className="w-full max-w-3xl flex justify-between items-center mb-4 px-2">
         <span className="text-sm font-semibold text-zinc-600 dark:text-zinc-400">🎸 AI 音乐云端拆分与跟弹</span>
         <div>
@@ -328,8 +370,11 @@ export default function Home() {
             <span className="text-xs text-zinc-400">加载中...</span>
           ) : user ? (
             <div className="flex items-center gap-3">
-              <span className="text-xs text-emerald-500 font-medium truncate max-w-[180px]">
-                👤 {user.email || user.user_metadata?.full_name || '已登录用户'}
+              <span className="text-xs text-emerald-500 font-medium truncate max-w-[160px]">
+                👤 {user.email || user.user_metadata?.full_name || '已登录'}
+              </span>
+              <span className="text-xs px-2.5 py-1 rounded-md bg-blue-900/40 text-blue-300 font-mono border border-blue-700/50">
+                剩余次数: {userCredits !== null ? userCredits : '...'}
               </span>
               <button
                 onClick={handleLogout}
@@ -343,7 +388,7 @@ export default function Home() {
               onClick={handleGoogleLogin}
               className="text-xs px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium shadow transition-all flex items-center gap-1.5"
             >
-              🔐 Google 快捷登录 (免费试用)
+              🔐 Google 快捷登录 (送 2 次免费体验)
             </button>
           )}
         </div>
@@ -382,7 +427,13 @@ export default function Home() {
               className={`w-full py-3 rounded-lg text-base font-semibold transition-all ${isProcessing ? 'bg-zinc-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg'
                 }`}
             >
-              {isProcessing ? 'AI 正在全力处理中 (请勿关闭)...' : user ? '🚀 开始 6 轨云端拆分与和弦跟弹' : '🔐 登录后开始 6 轨云端拆分'}
+              {isProcessing
+                ? 'AI 正在全力处理中 (请勿关闭)...'
+                : !user
+                  ? '🔐 登录后开始 6 轨云端拆分 (送 2 次)'
+                  : userCredits !== null && userCredits <= 0
+                    ? '❌ 免费额度已用完（请充值）'
+                    : `🚀 开始 6 轨云端拆分与和弦跟弹 (消耗 1 次, 剩余 ${userCredits})`}
             </button>
             {statusMsg && (
               <div className="text-center p-2 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-xs font-mono font-medium text-blue-600 dark:text-blue-400">
