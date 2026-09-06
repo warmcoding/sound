@@ -56,18 +56,27 @@ export default function Home() {
   const audioRefs = useRef<{ [key: string]: HTMLAudioElement | null }>({});
 
   // 获取用户剩余额度函数
+  // 获取用户剩余额度函数（安全兜底版）
   const fetchUserCredits = async (userId: string) => {
     const { data, error } = await supabase
       .from('user_credits')
       .select('credits')
       .eq('id', userId)
-      .single();
+      .maybeSingle();
 
-    if (data && !error) {
+    if (data) {
       setUserCredits(data.credits);
+    } else {
+      // 如果表中没有该用户的记录，自动帮他插入一条初始 2 次的记录
+      const { data: insertData } = await supabase
+        .from('user_credits')
+        .insert([{ id: userId, credits: 2 }])
+        .select('credits')
+        .maybeSingle();
+
+      setUserCredits(insertData ? insertData.credits : 2);
     }
   };
-
   // 1. 初始化检查登录状态并加载额度
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data: { user } }) => {
