@@ -271,7 +271,7 @@ export default function Home() {
       const res = await fetch(MODAL_ENDPOINT, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filename }),
+        body: JSON.stringify({ filename, task_id: currentTaskId }),
       });
 
       if (!res.ok) throw new Error('调起 Modal 失败');
@@ -320,8 +320,9 @@ export default function Home() {
     }
   };
 
-  // 辅助函数：根据历史记录的 task_id 获取特定分轨或和弦的下载链接
+  // 辅助函数：根据历史记录的 task_id 获取特定分轨或和弦的下载链接（加入空值容错判断）
   const getTrackDownloadUrl = (taskId: string, fileName: string) => {
+    if (!taskId) return '#';
     const { data } = supabase.storage
       .from('separated-tracks')
       .getPublicUrl(`results/${taskId}/${fileName}`);
@@ -329,6 +330,7 @@ export default function Home() {
   };
 
   const getChordDownloadUrl = (taskId: string) => {
+    if (!taskId) return '#';
     const { data } = supabase.storage
       .from('separated-tracks')
       .getPublicUrl(`results/${taskId}/chords.json`);
@@ -682,42 +684,48 @@ export default function Home() {
                     {/* 展开的下载面板 */}
                     {isExpanded && (
                       <div className="bg-zinc-100 dark:bg-zinc-900/80 p-4 border-t border-zinc-200 dark:border-zinc-700/50 flex flex-col gap-4">
-                        <div>
-                          <h4 className="text-xs font-bold text-zinc-500 dark:text-zinc-400 mb-2 uppercase tracking-wider">
-                            🎧 6 声道独立分轨下载
-                          </h4>
-                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                            {DEFAULT_TRACK_CONFIGS.map((trackConfig) => {
-                              const downloadUrl = getTrackDownloadUrl(item.task_id, trackConfig.file);
-                              return (
-                                <a
-                                  key={trackConfig.id}
-                                  href={downloadUrl}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="flex items-center justify-between p-2 rounded-lg bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 hover:border-blue-500 text-xs text-zinc-700 dark:text-zinc-200 transition-all"
-                                >
-                                  <span className="truncate">{trackConfig.name.split(' ')[1]}</span>
-                                  <span className="text-blue-500 font-bold ml-1">↓ 下载</span>
-                                </a>
-                              );
-                            })}
-                          </div>
-                        </div>
+                        {!item.task_id ? (
+                          <p className="text-xs text-red-500">该条历史记录缺少 task_id 无法加载分轨文件（属于旧数据）</p>
+                        ) : (
+                          <>
+                            <div>
+                              <h4 className="text-xs font-bold text-zinc-500 dark:text-zinc-400 mb-2 uppercase tracking-wider">
+                                🎧 6 声道独立分轨下载
+                              </h4>
+                              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                                {DEFAULT_TRACK_CONFIGS.map((trackConfig) => {
+                                  const downloadUrl = getTrackDownloadUrl(item.task_id, trackConfig.file);
+                                  return (
+                                    <a
+                                      key={trackConfig.id}
+                                      href={downloadUrl}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="flex items-center justify-between p-2 rounded-lg bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 hover:border-blue-500 text-xs text-zinc-700 dark:text-zinc-200 transition-all"
+                                    >
+                                      <span className="truncate">{trackConfig.name.split(' ')[1]}</span>
+                                      <span className="text-blue-500 font-bold ml-1">↓ 下载</span>
+                                    </a>
+                                  );
+                                })}
+                              </div>
+                            </div>
 
-                        <div>
-                          <h4 className="text-xs font-bold text-zinc-500 dark:text-zinc-400 mb-2 uppercase tracking-wider">
-                            🎸 吉他和弦识别数据
-                          </h4>
-                          <a
-                            href={getChordDownloadUrl(item.task_id)}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold shadow transition-all"
-                          >
-                            <span>📥 下载完整和弦数据 (chords.json)</span>
-                          </a>
-                        </div>
+                            <div>
+                              <h4 className="text-xs font-bold text-zinc-500 dark:text-zinc-400 mb-2 uppercase tracking-wider">
+                                🎸 吉他和弦识别数据
+                              </h4>
+                              <a
+                                href={getChordDownloadUrl(item.task_id)}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold shadow transition-all"
+                              >
+                                <span>📥 下载完整和弦数据 (chords.json)</span>
+                              </a>
+                            </div>
+                          </>
+                        )}
                       </div>
                     )}
                   </div>
