@@ -656,7 +656,7 @@ export default function Home() {
                 取消
               </button>
               <button
-                onClick={() => handleCheckout('price_1Nx_xxx_basic')}
+                onClick={() => handleCheckout('price_1UCdUGQz2VtPLHhxz4oWnvOb')}
                 className="flex-1 py-2.5 rounded-xl bg-blue-600 text-white font-medium hover:bg-blue-700 transition-colors shadow-lg shadow-blue-600/30"
               >
                 立即购买
